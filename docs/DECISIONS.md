@@ -2322,3 +2322,37 @@ establish that the readouts cannot be trusted.
 The grid opacity went from 4% to 9% and the label colour picked up the accent.
 At 4% the grid was invisible on an OLED panel, which is to say it was costing
 render time and delivering nothing.
+
+
+---
+
+## DEC-096 — Sidebar removed; the layout is a rail and two instrument clusters
+
+**Decision, at the product owner's request.** No side panel. Navigation is a
+top rail of tracked uppercase labels with a lit underline. The freed space
+becomes instrument clusters on both flanks: a concentric core ring, radial
+gauges for CPU and memory, an index-coverage dial, and a column of readouts.
+
+That is what the reference layout actually is, structurally — a rail across the
+top, readouts down the sides, a core in the middle. The previous version had
+applied the *styling* of a HUD to the *shape* of a normal desktop app, which is
+why it still read as a dark window with a sidebar.
+
+**Everything on those clusters is a real value.** CPU and memory come from the
+Rust sampler; the index dial is `vectors_indexed / (indexed + pending)`; CTX and
+TOOL are the current turn's actual counts. Where a value is unavailable — system
+telemetry in a browser session — the cluster says so in words rather than
+showing a zeroed dial, because a dial at zero looks like a reading.
+
+**Motion is conditional.** The core's three rings spin only while a turn is
+running. Three rings rather than one: one reads as a spinner, three read as a
+mechanism, which is the difference between "loading" and "thinking". The inner
+tick ring stays fixed so the moving rings have something to be relative to.
+
+**Gauges open at the bottom.** A closed ring reads as a pie chart and invites
+comparing areas; an open arc reads as a dial, which is what a percentage is.
+Twenty-four tick marks rather than four, because four reads as a progress bar
+bent into a circle.
+
+The clusters hide below `xl`. A gauge squeezed to nothing still costs its space
+and stops being readable, which is worse than not being there.
