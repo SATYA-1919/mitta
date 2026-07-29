@@ -219,3 +219,40 @@ mod tests {
         assert!(config.storage_root.is_none());
     }
 }
+
+#[cfg(test)]
+mod managed_state_tests {
+
+    /// Tauri resolves managed state by type. `app.manage(Arc::clone(&state))`
+    /// stores it under `Arc<AppState>`, so every command must ask for
+    /// `State<'_, Arc<AppState>>`.
+    ///
+    /// Getting this wrong compiles cleanly and fails at *call* time with
+    /// "state not managed for field `state`" — which is exactly how it
+    /// presented: the window opened, the sidecar ran, and every IPC call
+    /// returned an error the UI could only report as disconnected.
+    #[test]
+    fn commands_ask_for_the_type_that_is_actually_managed() {
+        // Comments stripped first: the explanation in `commands.rs` names the
+        // wrong type on purpose, and a grep over prose would match it.
+        let commands: String = include_str!("commands.rs")
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let wiring = include_str!("lib.rs");
+
+        assert!(
+            wiring.contains("app.manage(Arc::clone(&app_state))"),
+            "the composition root no longer manages an Arc; update commands.rs to match"
+        );
+        assert!(
+            !commands.contains("State<'_, AppState>"),
+            "a command asks for State<AppState> while Arc<AppState> is what is managed"
+        );
+        assert!(
+            commands.contains("State<'_, Arc<AppState>>"),
+            "commands should take the managed Arc"
+        );
+    }
+}

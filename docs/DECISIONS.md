@@ -2356,3 +2356,37 @@ bent into a circle.
 
 The clusters hide below `xl`. A gauge squeezed to nothing still costs its space
 and stops being readable, which is worse than not being there.
+
+
+---
+
+## DEC-097 — The diagnostic found the bug the guesses did not
+
+**The bug.** `lib.rs` calls `app.manage(Arc::clone(&app_state))`, which stores
+the value under the type key `Arc<AppState>`. Every command asked for
+`State<'_, AppState>`. Tauri resolves managed state **by type**, found nothing
+under that key, and failed — at *call* time, not compile time:
+
+    state not managed for field `state` on command `get_runtime_info`.
+    You must call `.manage()` before using this command
+
+**Why it took three attempts.** The symptom was "Disconnected", and I fixed two
+genuine but different causes first — `withGlobalTauri` (DEC-091) and the CSP
+meta tag (DEC-094). Both were real defects. Neither was *this* one, and each fix
+was followed by the same symptom, because a single message covered three
+unrelated failures.
+
+**What actually resolved it** was the change made alongside DEC-094: showing the
+underlying error in the standby panel instead of the word "Disconnected". The
+next screenshot contained the exact Tauri message, and the cause was obvious in
+seconds. The diagnostic was worth more than either fix that preceded it.
+
+**The regression test is a string check, deliberately.** The mismatch compiles
+cleanly — that is the whole problem — so no type-level test can catch it. The
+test asserts that `commands.rs` asks for the type `lib.rs` manages, and it
+strips comments first, because the explanation in that file names the wrong type
+on purpose and a grep over prose matched it on the first run.
+
+**The general lesson.** When a symptom has one name and several causes, fixing
+causes one at a time is guesswork with a good story attached. Making the system
+say which cause it is turns the next report into an answer.

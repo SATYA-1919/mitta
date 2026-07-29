@@ -7,8 +7,15 @@
 //! Notably absent: any command returning an API key, and any command taking a
 //! shell string. Both would be convenient. Both are how a rendering surface
 //! becomes an execution surface.
+//!
+//! State is taken as `State<'_, Arc<AppState>>`, matching exactly what
+//! `app.manage()` was given. Tauri resolves managed state by type, so
+//! `State<'_, AppState>` looks up a key nothing was stored under — and fails at
+//! *call* time, not compile time, with "state not managed for field `state`".
 
 use std::collections::HashMap;
+
+use std::sync::Arc;
 
 use tauri::{AppHandle, Manager, State};
 
@@ -19,17 +26,17 @@ use crate::state::AppState;
 use crate::windows;
 
 #[tauri::command]
-pub fn get_runtime_info(state: State<'_, AppState>) -> Result<RuntimeInfo, ShellError> {
+pub fn get_runtime_info(state: State<'_, Arc<AppState>>) -> Result<RuntimeInfo, ShellError> {
     state.runtime_info()
 }
 
 #[tauri::command]
-pub fn get_sidecar_state(state: State<'_, AppState>) -> SidecarState {
+pub fn get_sidecar_state(state: State<'_, Arc<AppState>>) -> SidecarState {
     state.state()
 }
 
 #[tauri::command]
-pub fn get_sidecar_error(state: State<'_, AppState>) -> Option<String> {
+pub fn get_sidecar_error(state: State<'_, Arc<AppState>>) -> Option<String> {
     state.last_error()
 }
 
