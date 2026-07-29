@@ -2224,3 +2224,56 @@ left a system whose connectivity depended on a config option that can be changed
 without anything failing — the same shape of defect, waiting. The imports are
 dynamic, so the browser build still never pulls the package in and the palette's
 bundle budget is untouched (2237 bytes, unchanged).
+
+
+---
+
+## DEC-092 — HUD chrome, no background image
+
+**Decision.** The JARVIS look is delivered as *chrome*: clipped panel corners,
+cyan hairlines with glow, an activity ring, segmented meters, connector rules,
+a faint grid. There is no background image and no Iron Man imagery — the product
+owner asked for neither, and a photographic backdrop under a dense readout costs
+contrast everywhere while adding nothing the frame does not already say.
+
+**The rule that shapes all of it: glow on chrome, never behind text.** A border,
+a ring, a tick mark can carry a drop-shadow and look right. Body text with a
+halo behind it photographs well and is tiring within about a minute.
+
+Three specifics worth their comments:
+
+- **The activity ring rotates only while a turn is running.** A ring that spins
+  permanently is decoration and stops carrying information; the whole point of
+  motion here is that it means MITTA is doing something.
+- **Meters are segmented, not smooth.** A continuous fill invites reading a
+  precise value off a 40-pixel strip it cannot support. Ten cells say "about six
+  tenths" and are honest about the resolution.
+- **Only the leading meter cell glows**, so the bar has an edge rather than a
+  wash.
+
+---
+
+## DEC-093 — Settings and Monitor exist to make claims checkable
+
+**Decision.** Four surfaces completed: Settings, History, Monitor, and the audit
+log behind `/v1/audit`.
+
+Several guarantees in this codebase had been assertions in a commit message.
+These turn them into things the user can look at:
+
+| Claim | Where it is now visible |
+| --- | --- |
+| Failover is health-based | Settings › reasoning — per-provider state and last error |
+| Keys never leave the Keychain or `.env` | Settings shows *configured* and the source, never a value |
+| Semantic recall degrades honestly | Settings › memory names the model and says when it is the fallback |
+| Approvals are parameter-bound and single-use | Settings › permissions states the tiers and the binding |
+| Everything MITTA does is recorded | Settings › activity, with the chain verified on read |
+| GPU is unmeasurable, not unmeasured | Monitor says so in words |
+
+**The chain is verified on every read, not cached.** A cached "intact" is a
+claim the user has to take on faith, which is precisely what the chain exists to
+avoid. A break reports the `seq` where it starts.
+
+**There is no endpoint that deletes from the audit log**, and a test asserts it
+against the live route table. A log the subject of the log can quietly edit is
+not an audit trail.

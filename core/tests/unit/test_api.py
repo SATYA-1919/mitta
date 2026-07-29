@@ -274,3 +274,55 @@ def test_no_endpoint_accepts_an_api_key(client: TestClient) -> None:
                 continue
             schema = str(body)
             assert "api_key" not in schema.lower(), f"{method.upper()} {path} accepts a key"
+
+
+# -- audit --------------------------------------------------------------- #
+
+
+def test_audit_reports_actions_and_verifies_the_chain(
+    client: TestClient, auth_headers: dict[str, str], migrated_audit: object
+) -> None:
+    from mitta.policy.audit import AuditLog
+
+    assert isinstance(migrated_audit, AuditLog)
+    migrated_audit.record(actor="agent", action="tool.web_search", subject="barca")
+
+    body = client.get("/v1/audit", headers=auth_headers).json()
+
+    assert body["entries"][0]["action"] == "tool.web_search"
+    # Recomputed on read, not cached. A cached "intact" is a claim the user has
+    # to take on faith, which is the thing the chain exists to avoid.
+    assert body["chain_intact"] is True
+    assert body["broken_at"] is None
+
+
+def test_audit_reports_a_broken_chain_as_broken(
+    client: TestClient, auth_headers: dict[str, str], migrated: object, migrated_audit: object
+) -> None:
+    from mitta.persistence.database import Database
+    from mitta.policy.audit import AuditLog
+
+    assert isinstance(migrated, Database) and isinstance(migrated_audit, AuditLog)
+    migrated_audit.record(actor="agent", action="one")
+    migrated_audit.record(actor="agent", action="two", subject="~/Documents")
+    migrated_audit.record(actor="agent", action="three")
+
+    with migrated.write() as conn:
+        conn.execute("UPDATE audit_log SET subject = 'harmless' WHERE action = 'two'")
+
+    body = client.get("/v1/audit", headers=auth_headers).json()
+
+    assert body["chain_intact"] is False
+    assert body["broken_at"] is not None
+
+
+def test_there_is_no_endpoint_that_deletes_from_the_audit_log(client: TestClient) -> None:
+    """A log the subject of the log can quietly edit is not an audit trail."""
+    paths = client.app.openapi()["paths"]  # type: ignore[attr-defined]
+    for path, methods in paths.items():
+        if path.startswith("/v1/audit"):
+            assert "delete" not in methods
+
+
+def test_audit_requires_a_token(client: TestClient) -> None:
+    assert client.get("/v1/audit").status_code in (401, 403)

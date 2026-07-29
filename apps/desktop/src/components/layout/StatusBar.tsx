@@ -1,3 +1,4 @@
+import { ActivityRing, Meter } from '@/components/ui/hud';
 import { type DotTone, Kbd, StatusDot } from '@/components/ui/primitives';
 import type { ConnectionState } from '@/lib/transport/socket';
 import { useStore } from '@/state/store';
@@ -17,11 +18,6 @@ const CONNECTION_LABEL: Record<ConnectionState, string> = {
   reconnecting: 'Reconnecting',
   closed: 'Disconnected',
 };
-
-function formatBytes(bytes: number): string {
-  const gb = bytes / 1024 ** 3;
-  return `${gb.toFixed(1)} GB`;
-}
 
 /**
  * The status bar is where the product's honesty lives. Connection state,
@@ -49,9 +45,9 @@ export function StatusBar() {
       </div>
 
       {activeTurn?.status === 'running' && (
-        <div className="flex items-center gap-1.5">
-          <StatusDot tone="warn" pulse />
-          <span className="capitalize">{activeTurn.phase ?? 'working'}</span>
+        <div className="flex items-center gap-1.5 text-accent">
+          <ActivityRing active size={14} />
+          <span className="label !text-accent">{activeTurn.phase ?? 'working'}</span>
         </div>
       )}
 
@@ -59,11 +55,23 @@ export function StatusBar() {
 
       {metrics !== null && (
         <>
-          <span className="readout">CPU {metrics.cpuPercent.toFixed(0)}%</span>
-          <span className="readout">RAM {formatBytes(metrics.memoryUsedBytes)}</span>
+          <Meter
+            label="CPU"
+            value={metrics.cpuPercent / 100}
+            tone={metrics.cpuPercent > 85 ? 'danger' : metrics.cpuPercent > 60 ? 'warning' : 'accent'}
+          />
+          <Meter
+            label="MEM"
+            value={
+              metrics.memoryTotalBytes > 0
+                ? metrics.memoryUsedBytes / metrics.memoryTotalBytes
+                : 0
+            }
+          />
+          {/* No unprivileged GPU API on Apple Silicon (ARCHITECTURE.md §13).
+              Shown as absent rather than as a fabricated number. */}
           <span className="readout text-fg-faint">
-            {/* No unprivileged GPU API on Apple Silicon (ARCHITECTURE.md §13). */}
-            GPU {metrics.gpuPercent === null ? 'n/a' : `${metrics.gpuPercent.toFixed(0)}%`}
+            GPU {metrics.gpuPercent === null ? '—' : `${metrics.gpuPercent.toFixed(0)}%`}
           </span>
           {metrics.batteryPercent !== null && (
             <span className="readout">

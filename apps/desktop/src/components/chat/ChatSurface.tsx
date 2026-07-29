@@ -9,6 +9,7 @@
 
 import { useEffect, useRef } from 'react';
 
+import { ActivityRing, HudPanel } from '@/components/ui/hud';
 import { Button, cx, EmptyState, Kbd, StatusDot } from '@/components/ui/primitives';
 import type { Message } from '@/lib/api/client';
 import { displayText, type PendingApproval, useStore } from '@/state/store';
@@ -105,7 +106,7 @@ function ActiveTurnRow() {
         <div className="flex items-center gap-3 border-l-2 border-accent/30 pl-3.5 text-2xs">
           {turn.phase !== null && (
             <span className="flex items-center gap-1.5 text-accent">
-              <StatusDot tone="ok" pulse />
+              <ActivityRing active size={12} />
               <span className="label !text-accent">{PHASE_LABEL[turn.phase] ?? turn.phase}</span>
             </span>
           )}
@@ -171,17 +172,12 @@ function ApprovalCard({ approval }: { approval: PendingApproval }) {
   }, []);
 
   return (
-    <div
-      role="alertdialog"
-      aria-label="MITTA needs permission"
-      className="max-w-[85%] rounded-lg border border-warning/40 bg-surface-raised p-3.5"
+    <HudPanel
+      label="permission required"
+      className="max-w-[85%] !border-warning/60 shadow-[0_0_14px_-3px_var(--color-warning)]"
+      right={<StatusDot tone="warn" pulse />}
     >
-      <div className="flex items-center gap-2 text-2xs text-warning">
-        <StatusDot tone="warn" pulse />
-        <span>MITTA needs your permission</span>
-      </div>
-
-      <p className="mt-2 text-sm leading-relaxed text-fg-primary">{approval.prompt}</p>
+      <p className="text-sm leading-relaxed text-fg-primary">{approval.prompt}</p>
 
       {/* The exact arguments, not a summary. The approval token binds to a hash
           of these values, so what is shown is what can run — approving "3 files"
@@ -201,7 +197,7 @@ function ApprovalCard({ approval }: { approval: PendingApproval }) {
             approval that is not bound to parameters, which is the property the
             whole token design exists to keep. */}
       </div>
-    </div>
+    </HudPanel>
   );
 }
 

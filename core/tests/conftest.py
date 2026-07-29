@@ -30,6 +30,7 @@ from mitta.memory.vectors.store import VectorStore, build_index
 from mitta.os_adapter.mac import MacAdapter
 from mitta.persistence.database import Database
 from mitta.persistence.migrations import migrate
+from mitta.policy.audit import AuditLog
 
 TEST_TOKEN = "test-session-token-0123456789abcdef"
 
@@ -98,6 +99,7 @@ def client(
     gateway: LLMGateway,
     conversations: ConversationRepository,
     orchestrator: Orchestrator,
+    migrated_audit: AuditLog,
 ) -> Iterator[TestClient]:
     app = create_app(
         settings=settings,
@@ -114,6 +116,7 @@ def client(
         gateway=gateway,
         conversations=conversations,
         orchestrator=orchestrator,
+        audit=migrated_audit,
     )
     with TestClient(app) as test_client:
         yield test_client
@@ -202,3 +205,8 @@ def orchestrator(
     """Built on the keyless gateway, so a turn fails at the provider rather than
     making a real call. Streaming behaviour is covered against fakes."""
     return Orchestrator(conversations, memory_service, gateway)
+
+
+@pytest.fixture
+def migrated_audit(migrated: Database) -> AuditLog:
+    return AuditLog(migrated)

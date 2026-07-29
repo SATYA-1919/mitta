@@ -19,6 +19,7 @@ from mitta.agent.orchestrator import Orchestrator
 from mitta.api.auth import TokenVerifier
 from mitta.api.exception_handlers import register_exception_handlers
 from mitta.api.http import (
+    audit_router,
     conversations_router,
     memory_router,
     providers_router,
@@ -35,6 +36,7 @@ from mitta.memory.indexer import Indexer
 from mitta.memory.service import MemoryService
 from mitta.os_adapter.base import OSAdapter
 from mitta.persistence.database import Database
+from mitta.policy.audit import AuditLog
 from mitta.policy.broker import ApprovalBroker
 from mitta.policy.engine import PolicyEngine
 from mitta.telemetry.logging import get_logger
@@ -60,6 +62,7 @@ def create_app(
     approval_broker: ApprovalBroker | None = None,
     policy: PolicyEngine | None = None,
     tool_registry: ToolRegistry | None = None,
+    audit: AuditLog | None = None,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -107,6 +110,7 @@ def create_app(
     app.state.approval_broker = approval_broker
     app.state.policy = policy
     app.state.tool_registry = tool_registry
+    app.state.audit = audit
     app.state.api_version = API_VERSION
     app.state.started_at = time.monotonic()
     app.state.token_verifier = TokenVerifier(
@@ -167,6 +171,8 @@ def create_app(
         app.include_router(conversations_router)
     # Always mounted: the socket authenticates and reports agent unavailability
     # itself, and a client that cannot connect at all has no way to be told why.
+    if audit is not None:
+        app.include_router(audit_router)
     app.include_router(ws_router)
 
     return app

@@ -32,6 +32,7 @@ from mitta.memory.service import MemoryService
 from mitta.memory.vectors.store import VectorStore, build_index
 from mitta.os_adapter.mac import MacAdapter
 from mitta.persistence.database import Database
+from mitta.policy.audit import AuditLog
 
 
 def build_openapi() -> dict[str, Any]:
@@ -68,6 +69,7 @@ def build_openapi() -> dict[str, Any]:
         embedder=embedder,
         gateway=LLMGateway([GroqProvider(None), OpenRouterProvider(None)]),
         conversations=ConversationRepository(database),
+        audit=AuditLog(database),
     )
     document: dict[str, Any] = app.openapi()
     _assert_complete(document)

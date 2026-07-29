@@ -214,6 +214,7 @@ def build_runtime(
         approval_broker=broker,
         policy=policy,
         tool_registry=registry,
+        audit=audit,
     )
 
     return Runtime(
