@@ -1866,3 +1866,110 @@ rewrite occurred when none did.
 Verified live: playful lowercased a reply and removed "I'd be happy to";
 serious kept a full stepped explanation intact and stripped only the padding.
 Both reported `changed: true`. A reply the layer left alone reports `false`.
+
+
+---
+---
+
+# Phase 8a — Permission Model
+
+Built before any tool that can do damage, deliberately. A permission model
+retrofitted onto working tools is a permission model with exceptions in it.
+
+---
+
+## DEC-079 — The security boundary is structural, and now CI-enforced
+
+**Decision.** `mitta.tools` may not import `mitta.os_adapter`. Activated as an
+import contract (it had been sitting commented out since Phase 3):
+
+    Tool Manager holds no OS Adapter reference KEPT
+
+**Why this rather than a check inside the tool.** A runtime check can be
+skipped by a code path that forgets it. A reference that does not exist cannot
+be used at all. Bypassing permission now requires editing the composition root —
+which is reviewed — **and** breaking a contract that fails the build. No
+sequence of model output can produce either.
+
+Getting the layer order right took a correction: I first placed `tools` above
+`policy`, and the contract failed because `policy.engine` reads `ToolSpec` and
+`Risk` to decide a verdict. The real dependency is `policy → tools`, which also
+makes the boundary one-directional — tools know nothing about policy, so a tool
+cannot consult, cache, or second-guess a verdict. Same class of mistake as
+DEC-039: ordering by conceptual position rather than by what actually imports
+what.
+
+---
+
+## DEC-080 — Approvals bind to parameters, not just to a tool
+
+**Decision.** An approval token carries a SHA-256 of the *exact* arguments, a
+single-use nonce, a 120-second expiry, and an HMAC signature over all of it.
+Verification and consumption happen in one transaction.
+
+Each binding closes a specific attack:
+
+| Binding | Without it |
+| --- | --- |
+| Parameter hash | Approving "delete these 3 files" is replayed against 300 |
+| Nonce, consumed once | One approval authorises unlimited runs |
+| Expiry | Tuesday's approval is still live on Friday |
+| Signature | The token is forged rather than obtained |
+
+The parameter binding is the one that matters and the easiest to omit. It is why
+the token is not simply "the user said yes to `delete_files`".
+
+**Consumption is inside the verification transaction.** Two concurrent calls
+with one token would otherwise both pass the check before either marked it used,
+and single-use would hold only when nothing raced.
+
+**The signing key is per-process and never persisted**, so a token cannot
+outlive the run that issued it. That costs nothing — approvals are answered in
+seconds — and removes a whole class of stale-authorisation problem.
+
+**Failures are reported vaguely and logged precisely.** `ApprovalInvalidError`
+says the same thing for a forged signature and for altered parameters; the audit
+log records which. A caller probing for the difference is a caller trying to
+forge one.
+
+---
+
+## DEC-081 — "Did not ask" is not "did not tell"
+
+**Decision.** Three risk tiers. `READ` runs without prompting; `WRITE` and
+`DESTRUCTIVE` require an approval token. **All three are written to the audit
+log**, and the log is surfaced in the UI.
+
+**Why read-only actions are still reported.** A web search changes nothing on
+the machine and sends the query to a third party, which is squarely R5's
+concern. Treating "harmless" as "invisible" would mean the user cannot see what
+was searched on their behalf — and the product owner's stated requirement is
+that MITTA tells them what it does, which is a broader promise than asking
+permission before dangerous things.
+
+**Tools declare their risk; they do not decide their treatment.** `Risk` is
+metadata the policy engine reads. A tool that could mark itself `READ` to skip
+confirmation would make the model advisory.
+
+**The registry filters by risk ceiling.** A model is only shown tools it is
+allowed to use in that context. A capability never offered cannot be requested,
+which is cheaper and more reliable than refusing the call afterwards.
+
+---
+
+## DEC-082 — The audit log is hash-chained
+
+**Decision.** Each entry stores a hash of its predecessor. `verify_chain`
+recomputes the whole chain and returns the `seq` of the first break.
+
+**What this is and is not.** It is tamper-*evidence*, not tamper-proofing —
+anyone with write access can rewrite the chain from scratch. What it catches is
+the realistic case: a bug, a partial delete, a dropped write. All produce a
+detectable break, and the alternative is a log nobody can tell has holes in it.
+
+Verified by doing it: editing one row's `subject` and deleting a middle entry
+are both detected.
+
+Reading the previous hash and writing the new row happen in one transaction.
+Two concurrent appends would otherwise chain off the same predecessor, forking
+the chain and failing verification on a database that is actually intact.
