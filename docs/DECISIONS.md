@@ -1442,3 +1442,105 @@ stopped their memory being indexed.
 SIGTERM before SIGKILL matters more than it looks: the sidecar owns the SQLite
 write lock, and a killed writer leaves a WAL to recover on next launch. Doing
 that routinely teaches the user that quitting risks their data.
+
+
+---
+---
+
+# Phase 7a — LLM Gateway (keyless)
+
+---
+
+## DEC-063 — Two key paths: Keychain for the app, gitignored `.env` for development
+
+**Decision.** Keys are read from the process environment. Two things put them
+there:
+
+1. The Rust shell reads the **macOS Keychain** and passes them at spawn. This is
+   the shipped path (R3, DEC-017) — entered in Settings, never touching a file.
+2. A **gitignored `.env`** at the repository root, for development.
+
+**Why a file at all**, given DEC-017. The product owner asked for one, and the
+request is reasonable: the Keychain path requires a running shell and a UI
+round-trip, which is friction for someone iterating on provider code, and
+`.env` survives a sidecar restart.
+
+**What makes it safe rather than a credential in the source tree.** `.env` and
+`.env.*` were already gitignored with `.env.example` explicitly re-included, and
+that was verified by attempting the commit rather than by reading the pattern:
+
+    $ git add .env
+    The following paths are ignored by one of your .gitignore files:
+    .env
+
+Beyond that: keys are registered with the `SecretRedactor` before any provider
+is constructed, so they cannot reach a log line even through an exception raised
+inside httpx; a permissive file mode is warned about at load; and the existing
+environment always wins over the file, so a stale `.env` cannot silently
+override a key just entered in Settings.
+
+Verified end to end — provider reports configured, `key_source: env_file`, and
+the key appears zero times in the startup logs.
+
+**What is still refused.** Keys in `config.json` (rejected by
+`_validate_config_file`), keys as command-line arguments (`ps` shows argv to
+every user on the machine), and any endpoint that accepts a key over HTTP — a
+key in a request body is a key in an access log the first time someone turns on
+request logging. A test asserts against the live route table that no endpoint
+accepts one, so a future route cannot quietly reintroduce it.
+
+---
+
+## DEC-064 — An auth failure does not open the circuit breaker
+
+**Problem.** `401` and `429` are both failures. Treating them the same is wrong
+in a way that wastes the user's time.
+
+**Decision.** A rate limit or a 5xx counts toward the breaker and takes the
+provider out of rotation. `ProviderAuthError` does not: the request fails over
+to the next provider, but the first is still reported `healthy`.
+
+**Why.** A rate-limited provider is *temporarily* unable to serve and will
+recover on its own. A provider with a bad key is working perfectly and will
+never recover without the user doing something. Marking it "unavailable" sends
+them to check their network, the provider's status page, and their firewall —
+everywhere except the one place the problem is.
+
+The same reasoning separates *unconfigured* from *unhealthy*. A provider with no
+key is absent, not failing, and is skipped silently. Showing "OpenRouter is
+down" to someone who simply never added an OpenRouter key is a lie the UI would
+tell every single session.
+
+---
+
+## DEC-065 — Streaming fails over before the first token, never after
+
+**Decision.** `LLMGateway.stream` will try the next provider if the current one
+fails before yielding anything. Once any text has been delivered, a failure
+propagates.
+
+**Why.** Failing over mid-reply means restarting the answer from the beginning
+with a different model. The user watches a half-written response vanish and be
+replaced by a different one — which reads as a bug even though every individual
+step behaved as designed. A partial reply plus a visible error is the honest
+outcome, and it is also the one the user can act on.
+
+---
+
+## DEC-066 — Routing is per task class, because "free" and "best" conflict
+
+**Decision.** `select_model` orders candidates differently depending on what the
+request is for (`ARCHITECTURE.md` §6):
+
+| Task | Ordering |
+| --- | --- |
+| Planning | Highest quality, cost ignored |
+| Personality, titling | Cheapest, quality as tie-break |
+| Everything else | Quality, cost as tie-break |
+
+**Why.** A single global "best model" setting resolves the tension in one
+direction and is wrong for half the traffic. Planning is where weak models
+actually fail, and a bad plan costs far more than a better model. The
+personality rewrite runs on **every reply**, so its latency is felt directly and
+its cost is multiplied by every message ever sent — spending a frontier model on
+a constrained restyle is the clearest waste in the system.

@@ -17,6 +17,9 @@ from fastapi.testclient import TestClient
 from mitta.api.app import create_app
 from mitta.config.paths import Paths
 from mitta.config.settings import DatabaseSettings, Settings
+from mitta.llm.gateway import LLMGateway
+from mitta.llm.providers.groq import GroqProvider
+from mitta.llm.providers.openrouter import OpenRouterProvider
 from mitta.memory.embedding.deterministic import DeterministicEmbedder
 from mitta.memory.indexer import Indexer
 from mitta.memory.repository import MemoryRepository
@@ -90,6 +93,7 @@ def client(
     memory_service: MemoryService,
     indexer: Indexer,
     embedder: DeterministicEmbedder,
+    gateway: LLMGateway,
 ) -> Iterator[TestClient]:
     app = create_app(
         settings=settings,
@@ -103,6 +107,7 @@ def client(
         # the lifespan actually starting it.
         indexer=None,
         embedder=embedder,
+        gateway=gateway,
     )
     with TestClient(app) as test_client:
         yield test_client
@@ -164,3 +169,14 @@ def memory_service(
     repository: MemoryRepository, vector_store: VectorStore, indexer: Indexer
 ) -> MemoryService:
     return MemoryService(repository, vector_store, indexer)
+
+
+@pytest.fixture
+def gateway() -> LLMGateway:
+    """A gateway with no keys.
+
+    Deliberately unconfigured: the suite must never make a real provider call,
+    and an accidental one would be a network request with someone's credential
+    on it. Failover behaviour is covered against fakes in `test_llm.py`.
+    """
+    return LLMGateway([GroqProvider(None), OpenRouterProvider(None)])

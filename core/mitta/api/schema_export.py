@@ -21,6 +21,9 @@ from typing import Any
 from mitta.api.app import create_app
 from mitta.config.paths import Paths
 from mitta.config.settings import Settings
+from mitta.llm.gateway import LLMGateway
+from mitta.llm.providers.groq import GroqProvider
+from mitta.llm.providers.openrouter import OpenRouterProvider
 from mitta.memory.embedding.deterministic import DeterministicEmbedder
 from mitta.memory.indexer import Indexer
 from mitta.memory.repository import MemoryRepository
@@ -62,6 +65,7 @@ def build_openapi() -> dict[str, Any]:
         # way to generate a type definition.
         indexer=None,
         embedder=embedder,
+        gateway=LLMGateway([GroqProvider(None), OpenRouterProvider(None)]),
     )
     document: dict[str, Any] = app.openapi()
     _assert_complete(document)
@@ -71,7 +75,7 @@ def build_openapi() -> dict[str, Any]:
 # Prefixes the frontend depends on. Listed explicitly so that adding a router
 # and forgetting to mount it here fails the build instead of quietly shrinking
 # the generated types.
-REQUIRED_PATH_PREFIXES = ("/v1/status", "/v1/capabilities", "/v1/memory")
+REQUIRED_PATH_PREFIXES = ("/v1/status", "/v1/capabilities", "/v1/memory", "/v1/providers")
 
 
 def _assert_complete(document: dict[str, Any]) -> None:

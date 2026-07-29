@@ -254,6 +254,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/providers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Provider health */
+        get: operations["providers_v1_providers_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/status": {
         parameters: {
             query?: never;
@@ -451,6 +468,34 @@ export interface components {
          * @enum {string}
          */
         MemoryStatus: "active" | "superseded" | "forgotten";
+        /** ProviderStatusResource */
+        ProviderStatusResource: {
+            /** Configured */
+            configured: boolean;
+            /** Last Error */
+            last_error: string | null;
+            /** Model Count */
+            model_count: number;
+            /** Name */
+            name: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "healthy" | "degraded" | "unavailable";
+        };
+        /** ProvidersResponse */
+        ProvidersResponse: {
+            /**
+             * Key Source
+             * @enum {string}
+             */
+            key_source: "keychain" | "env_file" | "none";
+            /** Providers */
+            providers: components["schemas"]["ProviderStatusResource"][];
+            /** Reasoning Available */
+            reasoning_available: boolean;
+        };
         /** SearchHitResource */
         SearchHitResource: {
             /** Keyword Rank */
@@ -964,6 +1009,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    providers_v1_providers_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProvidersResponse"];
                 };
             };
         };

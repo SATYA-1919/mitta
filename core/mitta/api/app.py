@@ -17,10 +17,11 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from mitta.api.auth import TokenVerifier
 from mitta.api.exception_handlers import register_exception_handlers
-from mitta.api.http import memory_router, system_router
+from mitta.api.http import memory_router, providers_router, system_router
 from mitta.api.middleware import RequestContextMiddleware
 from mitta.config.paths import Paths
 from mitta.config.settings import Settings
+from mitta.llm.gateway import LLMGateway
 from mitta.memory.embedding.base import EmbeddingProvider
 from mitta.memory.indexer import Indexer
 from mitta.memory.service import MemoryService
@@ -42,6 +43,7 @@ def create_app(
     memory: MemoryService | None = None,
     indexer: Indexer | None = None,
     embedder: EmbeddingProvider | None = None,
+    gateway: LLMGateway | None = None,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -79,6 +81,7 @@ def create_app(
     app.state.memory = memory
     app.state.indexer = indexer
     app.state.embedder = embedder
+    app.state.gateway = gateway
     app.state.api_version = API_VERSION
     app.state.started_at = time.monotonic()
     app.state.token_verifier = TokenVerifier(
@@ -133,5 +136,7 @@ def create_app(
     # 500 at request time instead of an obviously absent endpoint.
     if memory is not None:
         app.include_router(memory_router)
+    if gateway is not None:
+        app.include_router(providers_router)
 
     return app

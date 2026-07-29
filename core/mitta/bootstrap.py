@@ -28,6 +28,10 @@ from fastapi import FastAPI
 from mitta.api.app import create_app
 from mitta.config.paths import Paths, resolve_paths
 from mitta.config.settings import Settings, load_settings
+from mitta.llm import keys
+from mitta.llm.gateway import LLMGateway
+from mitta.llm.providers.groq import GroqProvider
+from mitta.llm.providers.openrouter import OpenRouterProvider
 from mitta.memory.embedding.base import EmbeddingProvider
 from mitta.memory.embedding.deterministic import DeterministicEmbedder
 from mitta.memory.embedding.local import LocalEmbedder
@@ -56,6 +60,7 @@ class Runtime:
     redactor: SecretRedactor
     memory: MemoryService
     indexer: Indexer
+    gateway: LLMGateway
     app: FastAPI
 
     def shutdown(self) -> None:
@@ -115,6 +120,14 @@ def build_runtime(
         backup_dir=paths.backups if settings.database.backup_before_migration else None,
     )
 
+    # Before providers are constructed, and after logging is up so the redactor
+    # is already guarding every handler.
+    env_file = keys.default_env_file()
+    if env_file is not None:
+        keys.apply_env_file(env_file)
+
+    gateway = _build_gateway(redactor)
+
     embedder = _select_embedder(paths)
     repository = MemoryRepository(database)
     store = VectorStore(database, build_index(paths.vectors / "memories.faiss", embedder), embedder)
@@ -139,6 +152,7 @@ def build_runtime(
         memory=memory,
         indexer=indexer,
         embedder=embedder,
+        gateway=gateway,
     )
 
     return Runtime(
@@ -149,7 +163,39 @@ def build_runtime(
         redactor=redactor,
         memory=memory,
         indexer=indexer,
+        gateway=gateway,
         app=app,
+    )
+
+
+def _build_gateway(redactor: SecretRedactor) -> LLMGateway:
+    """Construct the provider chain. Order is preference order (R3).
+
+    Every key found is registered with the redactor **before** any provider can
+    use it, so a key cannot reach a log line even via an exception message from
+    inside httpx.
+    """
+    resolved = {provider: keys.resolve(provider) for provider in keys.KEY_VARS}
+    for value in resolved.values():
+        if value is not None:
+            redactor.register(value)
+
+    configured = sorted(name for name, value in resolved.items() if value is not None)
+    if configured:
+        log.info("llm.providers_configured", extra={"providers": configured})
+    else:
+        # Not an error. The application runs without reasoning — memory, search
+        # and the UI all work — and says so rather than failing to start (R8).
+        log.warning(
+            "llm.no_provider_configured",
+            extra={"detail": "reasoning is unavailable until an API key is added"},
+        )
+
+    return LLMGateway(
+        [
+            GroqProvider(resolved.get("groq")),
+            OpenRouterProvider(resolved.get("openrouter")),
+        ]
     )
 
 

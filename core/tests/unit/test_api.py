@@ -238,3 +238,39 @@ def test_the_vite_dev_origin_is_not_allowed_outside_dev_mode(
     with TestClient(app) as production:
         response = production.get("/health", headers={"Origin": "http://127.0.0.1:1420"})
     assert "access-control-allow-origin" not in response.headers
+
+
+# -- providers --------------------------------------------------------------- #
+
+
+def test_providers_reports_both_as_unconfigured(
+    client: TestClient, auth_headers: dict[str, str]
+) -> None:
+    body = client.get("/v1/providers", headers=auth_headers).json()
+
+    assert [p["name"] for p in body["providers"]] == ["groq", "openrouter"]
+    assert all(not p["configured"] for p in body["providers"])
+    # The UI says reasoning is unavailable rather than accepting a message it
+    # already knows will fail (R8).
+    assert body["reasoning_available"] is False
+    assert body["key_source"] == "none"
+
+
+def test_providers_requires_a_token(client: TestClient) -> None:
+    assert client.get("/v1/providers").status_code in (401, 403)
+
+
+def test_no_endpoint_accepts_an_api_key(client: TestClient) -> None:
+    """A key arriving over HTTP is a key in an access log (DEC-017).
+
+    Asserted against the live route table rather than by reading the source, so
+    a future endpoint cannot quietly reintroduce one.
+    """
+    paths = client.app.openapi()["paths"]  # type: ignore[attr-defined]
+    for path, methods in paths.items():
+        for method, spec in methods.items():
+            body = spec.get("requestBody")
+            if body is None:
+                continue
+            schema = str(body)
+            assert "api_key" not in schema.lower(), f"{method.upper()} {path} accepts a key"
