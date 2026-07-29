@@ -47,8 +47,15 @@ from mitta.os_adapter.factory import create_os_adapter
 from mitta.persistence.database import Database
 from mitta.persistence.migrations import migrate
 from mitta.personality.rewriter import PersonalityLayer
+from mitta.policy.approval import ApprovalAuthority
+from mitta.policy.audit import AuditLog
+from mitta.policy.engine import PolicyEngine
+from mitta.policy.executor import ToolExecutor
 from mitta.telemetry.logging import get_logger, setup_logging
 from mitta.telemetry.redaction import SecretRedactor
+from mitta.tools.builtin.open_app import OpenAppTool
+from mitta.tools.builtin.web_search import WebSearchTool
+from mitta.tools.registry import ToolRegistry
 
 log = get_logger(__name__)
 
@@ -65,6 +72,7 @@ class Runtime:
     memory: MemoryService
     indexer: Indexer
     gateway: LLMGateway
+    audit: AuditLog
     conversations: ConversationRepository
     orchestrator: Orchestrator
     app: FastAPI
@@ -162,7 +170,22 @@ def build_runtime(
         enabled=settings.personality.enabled,
         intensity=settings.personality.intensity,
     )
-    orchestrator = Orchestrator(conversations, memory, gateway, extractor, personality)
+    audit = AuditLog(database)
+    approvals = ApprovalAuthority(database)
+    policy = PolicyEngine(audit, approvals)
+
+    # The registry is filled here and nowhere else. A capability that can act on
+    # the user's machine should appear in the composition root, where it can be
+    # read, rather than arriving because a module happened to be importable.
+    registry = ToolRegistry()
+    registry.register(WebSearchTool())
+    # The opener is injected rather than imported: `mitta.tools` may not reach
+    # `mitta.os_adapter`, and that contract is what keeps platform access behind
+    # the policy engine (DEC-079).
+    registry.register(OpenAppTool(os_adapter.open_application))
+    tools = ToolExecutor(registry, policy, database)
+
+    orchestrator = Orchestrator(conversations, memory, gateway, extractor, personality, tools)
 
     app = create_app(
         settings=settings,
@@ -186,6 +209,7 @@ def build_runtime(
         memory=memory,
         indexer=indexer,
         gateway=gateway,
+        audit=audit,
         conversations=conversations,
         orchestrator=orchestrator,
         app=app,

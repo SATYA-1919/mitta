@@ -34,3 +34,6 @@ class WindowsAdapter:
     def default_log_dir(self) -> Path:
         # Should return %LOCALAPPDATA%\MITTA\Logs
         raise NotImplementedError(_DEFERRED)
+
+    def open_application(self, name: str) -> None:
+        raise NotImplementedError(_DEFERRED)

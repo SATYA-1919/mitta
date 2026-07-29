@@ -45,3 +45,16 @@ class OSAdapter(Protocol):
     def default_log_dir(self) -> Path:
         """Directory for rotated structured logs."""
         ...
+
+    def open_application(self, name: str) -> None:
+        """Launch an application by name.
+
+        On the protocol rather than in a tool because R1 forbids any platform
+        assumption above this boundary, and `mitta.tools` is barred from
+        importing this module at all (DEC-079). A tool receives this as an
+        injected callable.
+
+        The name is validated by the caller. Implementations must still treat it
+        as untrusted — this is the point where a string becomes a process.
+        """
+        ...

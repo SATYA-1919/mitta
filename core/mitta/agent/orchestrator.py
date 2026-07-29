@@ -15,6 +15,7 @@ to attach, which is why `turns` is a table rather than a field on a message
 
 from __future__ import annotations
 
+import json
 import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
@@ -32,10 +33,19 @@ from mitta.conversations.models import (
 from mitta.conversations.repository import ConversationRepository
 from mitta.errors import MittaError, ProviderError
 from mitta.llm.gateway import LLMGateway
-from mitta.llm.models import ChatRequest, ModelDescriptor, TaskClass
+from mitta.llm.models import (
+    Capabilities,
+    ChatMessage,
+    ChatRequest,
+    ModelDescriptor,
+    Role,
+    TaskClass,
+)
 from mitta.memory.service import MemoryService
 from mitta.personality.rewriter import PersonalityLayer
+from mitta.policy.executor import ToolExecutor
 from mitta.telemetry.logging import get_logger
+from mitta.tools.base import Risk
 
 log = get_logger(__name__)
 
@@ -80,12 +90,14 @@ class Orchestrator:
         gateway: LLMGateway,
         extractor: MemoryExtractor | None = None,
         personality: PersonalityLayer | None = None,
+        tools: ToolExecutor | None = None,
     ) -> None:
         self._conversations = conversations
         self._memory = memory
         self._gateway = gateway
         self._extractor = extractor
         self._personality = personality
+        self._tools = tools
 
     async def run(
         self,
@@ -155,9 +167,16 @@ class Orchestrator:
                 },
             )
 
+            tool_messages: list[ChatMessage] = []
+            if self._tools is not None:
+                async for event, extra in self._run_tools(context, text, turn.id):
+                    if event is not None:
+                        yield event
+                    tool_messages.extend(extra)
+
             yield TurnEvent("turn.thinking", {"phase": "reasoning"})
             request = ChatRequest(
-                messages=context.messages,
+                messages=[*context.messages, *tool_messages],
                 task=TaskClass.CHAT,
                 memory_ids=context.memory_ids,
                 stream=True,
@@ -267,6 +286,90 @@ class Orchestrator:
                 "learned": len(learned),
             },
         )
+
+    async def _run_tools(
+        self, context: AssembledContext, text: str, turn_id: str
+    ) -> AsyncIterator[tuple[TurnEvent | None, list[ChatMessage]]]:
+        """Let the model call tools before it answers.
+
+        A single round, not a loop. Multi-step tool chains need the planner, and
+        an unbounded loop here is how an agent spends someone's rate limit on a
+        question it could not answer. One round covers the case that actually
+        matters — "search for X, then tell me" — and the ceiling is visible
+        rather than emergent.
+
+        Only `READ` tools are offered. Anything that writes needs the approval
+        round-trip through the UI, which does not exist yet; showing the model a
+        capability that cannot complete would produce confident promises MITTA
+        cannot keep.
+        """
+        assert self._tools is not None
+        schema = [spec.to_wire() for spec in self._tools.specs() if spec.risk is Risk.READ]
+        if not schema:
+            return
+
+        try:
+            decision = await self._gateway.complete(
+                ChatRequest(
+                    messages=context.messages,
+                    task=TaskClass.CHAT,
+                    required=Capabilities(tools=True),
+                    tools=schema,
+                    stream=False,
+                    max_tokens=512,
+                )
+            )
+        except ProviderError:
+            # Tools are an enhancement. A failure here leaves the turn to answer
+            # from memory alone, which is what it would have done anyway.
+            log.warning("turn.tool_selection_failed", extra={"turn_id": turn_id})
+            return
+
+        calls = decision.tool_calls or []
+        if not calls:
+            return
+
+        collected: list[ChatMessage] = []
+        for call in calls:
+            function = call.get("function") or {}
+            name = str(function.get("name") or "")
+            try:
+                arguments = json.loads(function.get("arguments") or "{}")
+            except json.JSONDecodeError:
+                arguments = {}
+            if not isinstance(arguments, dict):
+                arguments = {}
+
+            yield (
+                TurnEvent("turn.tool_started", {"tool": name, "params": arguments}),
+                [],
+            )
+
+            execution = await self._tools.execute(name, arguments, turn_id=turn_id)
+
+            yield (
+                TurnEvent(
+                    "turn.tool_finished",
+                    {
+                        "tool": name,
+                        "ok": execution.result.ok,
+                        "invocation_id": execution.invocation_id,
+                        # Surfaced so the user sees what MITTA did on their
+                        # behalf, not just that it did something (DEC-081).
+                        "summary": execution.result.content[:200],
+                    },
+                ),
+                [],
+            )
+
+            collected.append(
+                ChatMessage(
+                    Role.USER,
+                    f"Result of {name}({json.dumps(arguments)}):\n{execution.result.content}",
+                )
+            )
+
+        yield (None, collected)
 
     def _build_context(self, text: str, conversation_id: str) -> AssembledContext:
         # `touch=False`: a memory used to answer has genuinely been used, but

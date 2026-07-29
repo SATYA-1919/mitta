@@ -1973,3 +1973,66 @@ are both detected.
 Reading the previous hash and writing the new row happen in one transaction.
 Two concurrent appends would otherwise chain off the same predecessor, forking
 the chain and failing verification on a database that is actually intact.
+
+
+---
+
+## DEC-083 — One round of tools, not a loop
+
+**Decision.** The model gets a single opportunity to call tools before it
+answers. Results are fed back, then the reply is streamed. No iteration.
+
+**Why bounded.** An unbounded tool loop is how an agent spends a rate limit on a
+question it cannot answer, and the user watches a spinner while it does. Multi-
+step chains are the planner's job (Phase 9), where a plan is visible and
+cancellable. One round covers the case that actually matters — "search for X,
+then tell me" — and the ceiling is explicit rather than emergent.
+
+**Only `READ` tools are offered.** The approval round-trip through the UI does
+not exist yet, so a model shown a `WRITE` capability would make a confident
+promise MITTA cannot keep. A capability never offered cannot be requested.
+
+**A tool-selection failure is not a turn failure.** If the provider errors
+during the tool pass, the turn continues and answers from memory alone — which
+is what it would have done without tools.
+
+---
+
+## DEC-084 — The executor lives in `policy`, not `tools`
+
+**Problem.** `policy.engine` reads `ToolSpec` and `Risk` to reach a verdict, so
+policy sits above tools. An executor under `tools` that reached back for
+`PolicyEngine` closed that into a cycle, and the import contract said so.
+
+**Decision.** `mitta.policy.executor`.
+
+**Why this is the design and not filing.** Enforcement is what the executor
+does — it is not a tool, and placing it beside the tools would suggest a tool
+could construct one. Keeping `mitta.tools` ignorant of `mitta.policy` is what
+makes the boundary one-directional: a tool cannot consult, cache or second-guess
+a verdict, because it has no way to reach the thing that issues them.
+
+`open_app` shows the same principle in miniature. It takes the opener as an
+injected callable rather than importing the OS adapter, because
+`mitta.tools → mitta.os_adapter` is forbidden (DEC-079). The tool validates the
+application name against a strict pattern, and `mac.py` runs `/usr/bin/open` with
+an argument list rather than a shell string — so a name containing `;` is passed
+through as a literal name that fails to match an app, not as a command.
+
+---
+
+## Known defect — apostrophes truncate a tool argument
+
+Observed live: asking about the "Ballon d'Or" produced
+`web_search({"query": "last Ballon d"})`. The model's JSON escaping broke on the
+apostrophe and the argument was cut at it.
+
+Recorded rather than quietly patched, because the fix belongs upstream of the
+tool: arguments arrive as a JSON string the model generated, and a lenient
+re-parse would paper over malformed output that may be wrong in other ways too.
+The correct handling is to detect the truncation and retry the call — which
+needs the retry machinery the planner brings.
+
+Impact today is low: the search still returned the right answer, because a
+truncated query is usually still a usable one. It would matter for a path or a
+filename, which is one more reason no `WRITE` tool is offered yet.
