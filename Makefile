@@ -11,7 +11,7 @@ SHELL_DIR := apps/desktop/src-tauri
 CARGO   ?= $(HOME)/.cargo/bin/cargo
 
 .DEFAULT_GOAL := help
-.PHONY: help venv install install-ui test test-unit test-integration lint typecheck arch \
+.PHONY: help venv install install-ui secrets install-hooks test test-unit test-integration lint typecheck arch \
         check check-ui check-all run clean \
         dev dev-real ui-dev ui-build ui-test ui-typecheck ui-budget gen-types download-model \
         shell-build shell-test shell-lint shell-run check-shell
@@ -50,7 +50,16 @@ typecheck:  ## mypy --strict
 arch:  ## Verify the layer dependency contracts (DEC-029)
 	cd $(CORE) && ../$(VENV)/bin/lint-imports --config importlinter.ini
 
-check: lint typecheck arch test  ## Backend: everything CI runs
+secrets:  ## Fail if a credential is in a committed file
+	python3 scripts/check-no-secrets.py
+
+install-hooks:  ## Install the pre-commit secret guard
+	@mkdir -p .git/hooks
+	@printf '#!/bin/sh\nexec python3 "$$(git rev-parse --show-toplevel)/scripts/check-no-secrets.py"\n' > .git/hooks/pre-commit
+	@chmod +x .git/hooks/pre-commit
+	@echo "pre-commit hook installed — commits now fail if a key is staged"
+
+check: secrets lint typecheck arch test  ## Backend: everything CI runs
 
 # ── Frontend ───────────────────────────────────────────────────────────────
 

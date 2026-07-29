@@ -9,6 +9,10 @@ import pytest
 from mitta.telemetry.logging import RedactionFilter, get_logger
 from mitta.telemetry.redaction import REDACTED, SecretRedactor
 
+# check-no-secrets: allow — the fixtures below are synthetic, and they must look
+# like real keys because verifying that the redactor catches those shapes is the
+# entire purpose of this file.
+
 
 @pytest.mark.parametrize(
     "text",
