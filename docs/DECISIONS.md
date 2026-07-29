@@ -2632,3 +2632,316 @@ means the same thing — so only a swap is refused, never a loss.
 The rewrite prompts also now say not to drop a sentence, and that a question to
 the user stays a question to the user. The prompt is the request; the check is
 the guarantee.
+
+---
+---
+
+# Phase 10 — Projects
+
+---
+
+## DEC-105 — The phase is the path table; the rest of a project is CRUD
+
+**Problem.** `projects`, `project_paths` and `project_resources` were all created
+by the Phase 3 migration and never read. "Build projects" could reasonably mean
+any of three things: an organiser for conversations, a bookmark store, or the
+filesystem permission boundary the policy engine was specified against.
+
+**Decision.** The boundary is the phase. `projects` and `project_paths` are
+implemented end to end; `project_resources` is left with a table and no code.
+
+**Why.** `DATABASE_DESIGN.md` §6 calls `project_paths` a security table, and
+`ARCHITECTURE.md` §9 already specified "outside a configured project root" as a
+CONFIRM trigger. That trigger had no data behind it and no way to get any — there
+was no endpoint to register a path, and nothing that read one. Everything else a
+project does is organisational and can be added whenever it is wanted; a
+permission model with no way to state a permission is a gap in something already
+shipped.
+
+`project_resources` is dropped rather than half-built because `API_DESIGN.md`
+§3.4 specifies no endpoint for it. Repository methods no client can reach are
+untested in practice regardless of their coverage number, and the import contract
+file already states the principle: the codebase grows with the phase rather than
+being written against a hoped-for future.
+
+**Trade-off accepted.** Projects cannot yet hold bookmarks, and the `/timeline`
+endpoint returns an empty list because nothing writes an episode. The endpoint
+exists anyway, so the surface is built against a fixed shape rather than a guess.
+
+---
+
+## DEC-106 — Canonicalise before comparing, and compare components not characters
+
+**Problem.** Every containment check is a chance to be defeated by a path that
+means something other than it says.
+
+**Decision.** Two rules, both in `projects/boundary.py`. Paths are resolved —
+`~` expanded, `..` collapsed, symlinks followed — before they are stored and
+before they are matched. Containment is then tested on path *components*, never
+on string prefixes.
+
+**Why, concretely.** Three failures this closes, each of which passes a naive
+check:
+
+| Input | Naive result | Actual |
+| --- | --- | --- |
+| `/work/mitta/../../etc/passwd` | inside `/work/mitta` | not inside |
+| `~/project/data` → symlink to `~/.aws` | inside the project | outside it |
+| `/work/mitta-backup/dump.sql` | inside `/work/mitta` under `startswith` | a different directory |
+
+The third is the one that looks harmless. `str.startswith` reports
+`/home/satya-backup` as inside `/home/satya`, and a write grant on a home
+directory would silently extend to every sibling sharing its prefix.
+
+Resolution happens in the repository rather than at the API edge, so no caller
+can insert an unresolved path. A stored `~/work/../.ssh` would make every later
+check wrong for as long as the row lived.
+
+**Trade-off accepted.** `resolve(strict=False)` touches the filesystem, so a
+boundary check costs a few `stat` calls. It has to: a symlink must be followed to
+be seen, and following it is the check.
+
+---
+
+## DEC-107 — Longest match wins, in both directions
+
+**Problem.** A project rooted at `~/work/mitta` with `~/work/mitta/.env`
+excluded needs the exclusion to beat the root. But the reverse also has to work:
+an excluded `~/work` with `~/work/mitta` granted inside it.
+
+**Options.** (a) Exclusions always win. (b) Insertion order decides. (c) The
+deepest matching rule decides.
+
+**Decision.** (c).
+
+**Why.** (a) handles the common case and makes re-inclusion impossible, so a
+user who excludes a broad tree can never carve an exception out of it. (b) is
+worse than either: the user adds paths over months and cannot be expected to
+remember what they added first, and the same configuration would behave
+differently depending on the order rows came back from SQLite.
+
+Longest match is the rule that reads as intent — the user's *most specific*
+statement about a path is the one that holds. It also makes the resolution order
+independent of the query plan, which is asserted both ways in the tests.
+
+---
+
+## DEC-108 — Outside every project is a question, not a refusal
+
+**Problem.** What should the boundary say about a path no project covers?
+
+**Decision.** `OUTSIDE` escalates to CONFIRM. It never denies.
+
+**Why.** Deny-by-default sounds like the secure answer and is the wrong one
+here. A fresh install has no projects configured, so denying the unknown would
+make a machine where nothing works at all — and the user's response to that is to
+register `/` as writable, which is strictly worse than asking. The honest answer
+to "may I touch this file you have never mentioned" is a question, and MITTA
+already has a mechanism for asking.
+
+Only `EXCLUDED` denies, and only because the user said so explicitly. The
+distinction is between *not told* and *told not to*.
+
+---
+
+## DEC-109 — The engine learns which arguments are paths from a declaration
+
+**Problem.** `PolicyEngine.evaluate` receives `(spec, params)`. To resolve a
+path against the boundary it has to know which parameters are paths, and it
+cannot know that from a JSON Schema that says `{"type": "string"}`.
+
+**Options.** (a) Sniff the parameter names — anything called `path`, `file`,
+`dir`. (b) Let the tool resolve its own paths and report the result. (c) A
+`path_params` declaration on `ToolSpec` that the engine reads.
+
+**Decision.** (c).
+
+**Why.** (a) fails in the direction that costs a file: a tool whose path
+argument is called `destination` would skip the check and be indistinguishable
+from a tool that has no path at all. (b) puts a permission decision inside the
+component the permission model exists to constrain — the same reason `Risk` is
+metadata the tool declares and the engine interprets, rather than a verdict the
+tool reaches.
+
+(c) keeps the check in the engine and the declaration in one reviewable line.
+`()` means "no filesystem reach", which is a claim a reviewer can check against
+the tool's body.
+
+**What is honest about the current state.** No shipped tool declares
+`path_params`. `write_note` has its own narrower sandbox and its `filename` is
+not a path. So this machinery is exercised only by tests today.
+
+That is deliberate, and it is the same argument R1 makes for building the OS
+abstraction before Windows exists: the alternative is shipping the first
+filesystem tool together with its permission check and discovering the check was
+wrong from a missing file. A boundary is worth less the day after it is needed.
+
+---
+
+## DEC-110 — `writable` widens where, not whether
+
+**Problem.** If a path is registered writable, should a `WRITE` tool acting
+inside it still ask?
+
+**Decision.** Yes. The boundary can only ever make a decision stricter, never
+looser.
+
+**Why.** These are two different questions, and collapsing them turns "this
+folder is in scope" into "anything in this folder happens unattended" — which is
+not what a user thinks they are agreeing to when they tick a box next to a
+directory. Risk says what a tool does; the boundary says where. A path grant
+removes a *location* objection and leaves the tier intact.
+
+The one place the boundary affects a `READ` is `OUTSIDE`, which escalates. A read
+inside a registered root — writable or not — stays auto-approved, because being
+able to look inside the project is what registering it was for.
+
+---
+
+## DEC-111 — A refusal is not a question, and an approval cannot lift one
+
+**Problem.** The engine gained a verdict it never used to produce. `Decision`
+already had three states, but every path through `evaluate` returned `allow` or
+`confirm`, so both callers treated "not allowed" as "ask the user".
+
+**Two bugs, found by writing the tests rather than by running it.**
+
+`ToolExecutor.execute` branched on `if not decision.allowed`, so a refused call
+would have raised an approval card. Clicking Approve returns to `authorise`,
+which refuses again — a question with no answer that resolves it.
+
+`PolicyEngine.authorise` verified the approval token before checking the verdict,
+so a token issued while a path was writable would have survived the user
+excluding that path. That is exactly the window an exclusion exists to close.
+
+**Decision.** `Decision.refused` is explicit. `authorise` checks it before it
+looks at any token and audits the attempt including whether one was presented.
+`execute` returns a sentence the model can relay instead of pausing the turn.
+
+---
+
+## DEC-112 — Archiving a project withdraws its path grants
+
+**Problem.** Archiving is a filing operation for a conversation. Is it one for a
+project?
+
+**Decision.** No. `paths_containing` joins on `projects.status = 'active'`, so an
+archived project grants nothing. The rows are kept, so unarchiving restores them.
+
+**Why.** A project the user has put away should not still be authorising writes
+to a directory. Archiving is the natural way to express "I am done with this",
+and the permission consequence is what the user would expect if they thought
+about it — so the alternative is a grant that outlives the user's attention.
+
+The UI says so rather than leaving it to be inferred: an archived row is labelled
+*path grants withdrawn*, and the transition writes to the audit log, because it
+changes what MITTA may do and not just how a list is sorted.
+
+---
+
+## DEC-113 — The boundary is inspectable before it is enforced
+
+**Decision.** `GET /v1/projects/resolve-path` returns what the engine would
+conclude about a path, and why. It is an addition to `API_DESIGN.md` §3.4.
+
+**Why.** R5's enforcement clause is that anything the user cannot inspect they
+cannot trust. A boundary whose only observable behaviour is a confirmation card
+at the moment of action fails that: the user discovers the rule from the
+consequence, at the worst moment to be reading carefully.
+
+The endpoint returns the server's own explanation sentence, and the surface
+renders it verbatim rather than reconstructing one client-side. The engine and
+the UI cannot disagree about a permission if only one of them writes the
+sentence.
+
+---
+
+## DEC-114 — Two mistakes this phase made, and what caught them
+
+Recorded because both were the kind that passes review.
+
+**The engine escalated a read inside a read-only root.** The comment above the
+code said `READ_ONLY` should fall through to auto-approval; the code returned the
+boundary's `confirm` for anything that was not `WRITABLE`. Registering a project
+would have made MITTA ask before every file it looked at inside that project —
+annoying enough that the user would grant write everywhere to stop it. Caught by
+the test written from the comment's own claim.
+
+The fix was structural rather than a patched condition: `_locate` now returns a
+`Resolution` and `evaluate` maps it per tier. A helper that had already collapsed
+location into a verdict could not express "forbids a write, permits a read",
+which is what `READ_ONLY` means.
+
+**The surface offered a choice the engine does not honour.** Driving the real UI
+showed the boundary checker reporting an excluded path as
+`EXCLUDED · MITTA would ask`. The engine refuses that path correctly; the *wire*
+misdescribed it, because `Resolution.needs_confirmation` was defined as "anything
+not writable" and therefore covered exclusions too.
+
+Neither the type checker nor 570 backend tests could catch this: the flag was
+internally consistent, and every test asserted on the verdict the engine reached
+rather than on the sentence the user reads. It took looking at the screen.
+
+`refused` and `needs_confirmation` are now separate, never both true, and that
+invariant is a test. The same session found a second copy bug the tests had no
+opinion about — a path contains itself, so the explanation read "`.env` is inside
+`.env`, which you excluded", which is true and reads as a broken string. A
+confirmation sentence that looks buggy costs the credibility it needs to be read
+at all, which is the whole reason DEC-088 exists.
+
+**The codegen guard did not fire.** `schema_export.py` exists to fail the build
+when a router is added and not mounted for OpenAPI export — and the projects
+router was added, not mounted, and the export succeeded, because
+`REQUIRED_PATH_PREFIXES` is a hand-maintained list and `/v1/projects` was not on
+it. The generated TypeScript was silently 672 lines short, which is the exact
+failure the guard was written to prevent. It is a guard against forgetting to
+mount, resting on remembering to list.
+
+Fixed by mounting and listing, which restores the guard for the *next* router
+without removing the way it failed for this one. Deriving the list from the
+mounted routers would make it self-maintaining and also make it vacuous — it
+would assert that what was exported was exported. The real fix is a test that
+knows the router exists independently of the export, and that is what
+`test_the_router_is_absent_without_its_collaborators` and the HTTP tests now do
+from the other side.
+
+
+---
+
+## DEC-105 — Wake-word activation: push-to-talk by default, listening as a choice
+
+R7 left this open and said not to assume it: **Apple ships no wake-word API.**
+`SFSpeechRecognizer` transcribes; it does not wait for a trigger phrase. So
+"MITTA" as a wake word has no free implementation, and the question is what to
+build instead.
+
+**Three options, and why two lose.**
+
+*A dedicated wake-word engine* (Porcupine and friends) is the accurate answer
+and is ruled out by R7 itself: it wants no model downloads and no per-minute
+cost, and these ship a licensed model file. Choosing it would mean amending the
+requirement, not satisfying it.
+
+*Continuous on-device recognition*, matching "mitta" in a live transcript, is
+the only true wake word that stays inside R7. It also means the microphone is
+open for the entire session. That is a privacy posture change, not a feature
+detail, and it is not something to switch on for someone by default in an
+application whose first requirement is local-first.
+
+*Push-to-talk* has no trigger phrase at all, and is the only one of the three
+that is exactly as private as the app is when idle.
+
+**Decision.** Push-to-talk is the default and always available: hold the mic
+button, or ⌘⇧V. Continuous listening exists as an explicit opt-in with a visible
+indicator whenever the microphone is live, and it matches the wake word in the
+transcript rather than pretending to hear it.
+
+**What the opt-in costs, stated plainly** so the toggle is an informed one:
+Apple's on-device recogniser stops after about a minute and must be restarted,
+so continuous mode recycles its session; the microphone is open throughout; and
+battery is measurably worse. None of that applies to push-to-talk.
+
+**Consequence for R5.** Neither mode sends audio anywhere. Recognition is
+on-device (`requiresOnDeviceRecognition`), which is what makes the wake word
+compatible with local-first at all — a cloud recogniser would put a permanently
+open microphone on someone else's server.
