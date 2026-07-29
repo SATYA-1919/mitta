@@ -10,6 +10,14 @@ dependencies = [
     "uvicorn[standard]>=0.32",
     "pydantic>=2.9",
     "pydantic-settings>=2.6",
+    # Memory engine. `faiss-cpu` rather than `faiss-gpu`: the corpus is small
+    # enough that flat CPU search is milliseconds, and a GPU build would add a
+    # CUDA dependency for no gain on Apple Silicon.
+    "numpy>=2.0",
+    "faiss-cpu>=1.9",
+    # ONNX, not PyTorch. `sentence-transformers` would pull ~2 GB of torch to
+    # run a 67 MB model — larger than the rest of the application combined.
+    "fastembed>=0.4",
 ]
 
 [project.optional-dependencies]
@@ -82,6 +90,18 @@ ignore = [
     "S106",  # hardcoded password argument
     "S310",  # urllib on a non-audited URL — always 127.0.0.1 here
     "S603",  # subprocess without shell=True — that is the safe form
+]
+
+[tool.ruff.lint.flake8-bugbear]
+# `Query(...)` / `Depends(...)` in a default is the FastAPI idiom, not the
+# mutable-default bug B008 exists to catch — these return immutable marker
+# objects that FastAPI reads at route-registration time.
+extend-immutable-calls = [
+    "fastapi.Query",
+    "fastapi.Path",
+    "fastapi.Body",
+    "fastapi.Header",
+    "fastapi.Depends",
 ]
 
 [tool.ruff.lint.flake8-tidy-imports]

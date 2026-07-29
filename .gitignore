@@ -55,3 +55,6 @@ voice_cache/
 
 # ── macOS ───────────────────────────────────────────────────────────────
 .DS_Store
+
+# Editor/agent session config, not project config.
+.claude/

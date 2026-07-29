@@ -98,12 +98,12 @@ class ConsoleFormatter(logging.Formatter):
     """Human-readable, for development. Never used for the file handler."""
 
     def format(self, record: logging.LogRecord) -> str:
-        base = f"{self.formatTime(record, '%H:%M:%S')} {record.levelname:<7} " \
-               f"{record.name:<28} {record.getMessage()}"
+        base = (
+            f"{self.formatTime(record, '%H:%M:%S')} {record.levelname:<7} "
+            f"{record.name:<28} {record.getMessage()}"
+        )
         extras = {
-            k: v
-            for k, v in record.__dict__.items()
-            if k not in _RESERVED and not k.startswith("_")
+            k: v for k, v in record.__dict__.items() if k not in _RESERVED and not k.startswith("_")
         }
         if extras:
             base += "  " + " ".join(f"{k}={v}" for k, v in extras.items())

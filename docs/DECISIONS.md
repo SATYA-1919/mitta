@@ -1061,3 +1061,196 @@ The `styled: false` branch matters more than it looks: without it, a no-op
 rewrite still assigns `final`, and the user sees a flicker for a change that
 did not happen.
 
+
+
+---
+---
+
+# Phase 5 — Memory Engine
+
+---
+
+## DEC-047 — `bge-small-en-v1.5` on ONNX, not sentence-transformers
+
+**Problem.** Local embeddings need a model and a runtime. The obvious choice,
+`sentence-transformers`, pulls PyTorch.
+
+**Decision.** `BAAI/bge-small-en-v1.5` — 384 dimensions, 67 MB, MIT — run
+through `fastembed`'s ONNX runtime.
+
+**Why.** PyTorch is roughly 2 GB. It would be, by a wide margin, the largest
+thing in the application, and it would be there to run a 67 MB model. The full
+memory stack as installed — ONNX runtime, FAISS, tokenizers, numpy — comes to
+about 135 MB with no torch anywhere.
+
+**Verified, not assumed.** The model was downloaded and run. A related
+query/document pair scores 0.848; an unrelated one 0.360. End to end, "what
+automobile do I own" retrieves "I drive a Honda City" with no shared tokens at
+all, which is the capability the whole local-embedding argument rests on.
+
+**The asymmetry matters.** BGE was trained with an instruction prefix on queries
+and none on documents, so `embed_query` and `embed_documents` are separate
+methods rather than one. Collapsing them costs several points of recall and the
+loss is invisible without a benchmark — which is exactly why the prefix is a
+module constant and not something a caller is trusted to remember.
+
+---
+
+## DEC-048 — Flat exact index, not approximate
+
+**Decision.** `IndexIDMap2` over `IndexFlatIP`. No IVF, no HNSW, no training.
+
+**Why.** Approximate indexes start earning their keep somewhere past a million
+vectors. A personal memory corpus is three orders of magnitude below that, where
+exact search over 384-dim float32 is a few milliseconds. Choosing approximate
+now would trade real recall for imaginary speed and add a training step that has
+to be re-run as the corpus grows.
+
+**Why the ids are `seq`.** FAISS ids are int64, and `memories.seq` is `INTEGER
+PRIMARY KEY AUTOINCREMENT` — which SQLite guarantees never to reuse, even after
+deletion. Plain `INTEGER PRIMARY KEY` reuses the largest rowid after a delete,
+which would make a stale vector resolve to a *different* memory. That is a wrong
+answer with no error anywhere, and DEC-025 exists to prevent it.
+
+**Considered and rejected: storing vectors as a BLOB in SQLite.** It would make
+index rebuilds a scan instead of re-inference. But a flat FAISS file already
+*is* essentially the vectors, the atomic-rename write closes the crash window,
+and re-embedding a realistic corpus takes seconds. Permanent double storage for
+a rare, already-fast recovery is a bad trade.
+
+---
+
+## DEC-049 — Read-your-own-writes inside a transaction
+
+**Problem.** `MemoryRepository.supersede` calls `add`, which inserts and then
+reads the row back. Under WAL a pooled reader is on a different connection and
+sees only the last committed snapshot, so the read found nothing:
+`NotFoundError: memory '2' not found`.
+
+**Decision.** `Database.read()` hands back the *write* connection when the
+calling thread is inside a write transaction, tracked with a thread-local depth
+counter.
+
+**Why this is a correctness fix and not an optimisation.** `write()` is
+deliberately reentrant so a repository method behaves the same standalone as it
+does nested (DEC-024). That guarantee is worthless if the nested method cannot
+see its own writes. The bug is invisible in any method that only writes, and
+fatal the moment two methods compose — so it would have shipped, and surfaced as
+a phantom missing row under load.
+
+Thread-local rather than a plain counter: the indexer writes on a worker thread
+while the API reads on another, and only the writer's own reads may be
+redirected.
+
+---
+
+## DEC-050 — Explicit model download, with a working fallback
+
+**Problem.** The weights are a 67 MB fetch from Hugging Face. Two bad options
+present themselves: download silently on first use, or refuse to index until the
+user downloads.
+
+**Decision.** Neither. `bootstrap.py` uses the real model when its weights are
+already on disk, and falls back to a deterministic hashed-token provider when
+they are not. Downloading is a separate, explicit action (`make download-model`).
+
+**Why not silent download.** R5 says nothing leaves the machine except requests
+to the configured LLM APIs. Weights are not user data, so this is the spirit
+rather than the letter — but a third-party network call triggered by "remember
+this" is exactly the kind of thing that erodes the local-first claim.
+
+**Why not refuse to index.** A first run that silently drops every memory's
+vector, with a backfill nobody knows to wait for, is a far worse failure than
+degraded recall that repairs itself.
+
+**Why nothing is stranded.** The two providers report different `model_id`s, and
+the staleness query already keys on `model_id` (`DATABASE_DESIGN.md` §4.3). Every
+vector written by the fallback becomes eligible for re-embedding the instant the
+real model appears — no migration, no special code path, no operator action.
+
+That is also why the deterministic provider is production code rather than a
+test fixture. It doubles as the test double, which lets the entire engine be
+exercised without loading 130 MB of ONNX runtime into every unit test.
+
+---
+
+## DEC-051 — A model-specific similarity floor
+
+**Problem.** Found by running the real thing rather than by reading the code.
+With four memories stored, "any drug allergies" returned the penicillin memory
+**and** "mochi is my cat" — at 99% of the top score. A flat index has no notion
+of "no good match": it returns the `k` nearest vectors however far away they
+are.
+
+**Decision.** `ModelDescriptor.min_similarity`, applied in `FaissIndex.search`.
+BGE: 0.55. Deterministic: 0.05.
+
+**Why it is not one constant.** BGE compresses everything into a narrow high
+band — 0.85 for clearly related, 0.36 for clearly unrelated. Signed hashed
+bag-of-tokens sits near zero for unrelated text. A single global threshold would
+reject everything for one provider or nothing for the other, so the value
+belongs to the model, which is the only thing that knows its own scale.
+
+**Why it matters beyond ranking.** Context assembly is a budgeted chokepoint
+(R5): whatever retrieval returns is what gets sent to the LLM. Without a floor,
+every question packs unrelated personal facts into the prompt. This is a
+retrieval-quality problem and a privacy problem in the same line of code.
+
+After the fix, each query returns exactly its one relevant memory, and "what is
+the capital of France" correctly returns nothing at all.
+
+---
+
+## DEC-052 — Status is reported honestly, including when degraded
+
+**Problem.** The first `/v1/memory/stats` response said
+`embedding_model_available: true` while the log line directly above it said the
+model was absent and the fallback was in use. The field was computed with
+`hasattr(embedder, "is_available")`, and the stand-in has no such method.
+
+**Decision.** `ModelDescriptor.degraded`, declared by each provider. Stats now
+report `embedding_degraded`, `embedding_model_id` and
+`embedding_model_downloaded` — three facts instead of one guess. `SearchResponse`
+carries `semantic_available` for the same reason.
+
+**Why.** A status endpoint that guesses will eventually guess wrong, and this one
+guessed wrong immediately. Telling a user semantic search works when it does not
+is worse than telling them nothing: they would attribute the poor recall to the
+product being bad rather than to a model they could download in forty seconds.
+
+This is the same commitment as showing GPU as unavailable rather than fabricating
+a number (`ARCHITECTURE.md` §13).
+
+---
+
+## DEC-053 — Nothing is destroyed except by explicit request
+
+**Decision.** `forget()` sets a status. `supersede()` links old to new and keeps
+both. Decay only ever demotes. The repository has exactly one method that
+deletes — `purge()` — and it is reachable only from `DELETE /v1/memory/{id}`.
+
+**Why.** A correction is not a deletion. "I moved to Bangalore" does not make "I
+lived in Hyderabad" false; it makes it historical. An assistant that overwrites
+has no way to answer "where did I used to live", and it has quietly destroyed
+something the user never asked it to.
+
+Decay is the sharper case. No confidence in the retention formula justifies a
+system that silently deletes a user's accumulated context because arithmetic said
+so. Rows below the threshold move to `forgotten` and leave the vector index; they
+remain in SQLite. **Decay demotes; the user deletes.**
+
+`pinned = 1` bypasses the retention calculation entirely, and also survives an
+expired TTL. Explicit intent is not an input to be weighed — it is the answer.
+
+---
+
+## DEC-054 — Attributes are validated per kind, not stored as free-form JSON
+
+**Decision.** A Pydantic model per `MemoryKind`, with `extra="forbid"`.
+
+**Why.** `attributes` is a JSON column, so SQLite accepts `{"catgory": "work"}`
+without complaint. The memory is then permanently unqueryable by category — a
+silent data-loss bug that surfaces months later as "why doesn't search find
+this". The schema cannot catch it; the `CHECK (json_valid(...))` constraint only
+verifies it is JSON. This is the layer that can, and `extra="forbid"` is what
+makes a typo an error instead of a shrug.

@@ -13,7 +13,8 @@ construction rather than by convention, and both live here:
 * Nothing above the OS Adapter ever learns a platform-specific path, because
   paths are resolved once, here, from the adapter.
 
-Landing in Phase 3: config, telemetry, OS adapter, persistence, API.
+Landed so far: config, telemetry, OS adapter, persistence, API (Phase 3) and the
+memory engine (Phase 5).
 """
 
 from __future__ import annotations
@@ -27,6 +28,13 @@ from fastapi import FastAPI
 from mitta.api.app import create_app
 from mitta.config.paths import Paths, resolve_paths
 from mitta.config.settings import Settings, load_settings
+from mitta.memory.embedding.base import EmbeddingProvider
+from mitta.memory.embedding.deterministic import DeterministicEmbedder
+from mitta.memory.embedding.local import LocalEmbedder
+from mitta.memory.indexer import Indexer
+from mitta.memory.repository import MemoryRepository
+from mitta.memory.service import MemoryService
+from mitta.memory.vectors.store import VectorStore, build_index
 from mitta.os_adapter.base import OSAdapter
 from mitta.os_adapter.factory import create_os_adapter
 from mitta.persistence.database import Database
@@ -46,9 +54,15 @@ class Runtime:
     os_adapter: OSAdapter
     database: Database
     redactor: SecretRedactor
+    memory: MemoryService
+    indexer: Indexer
     app: FastAPI
 
     def shutdown(self) -> None:
+        # Indexer first. It writes to the database, so stopping it after closing
+        # the connection would surface as a spurious "database is not connected"
+        # on the way down.
+        self.indexer.stop()
         self.database.close()
 
 
@@ -101,11 +115,30 @@ def build_runtime(
         backup_dir=paths.backups if settings.database.backup_before_migration else None,
     )
 
+    embedder = _select_embedder(paths)
+    repository = MemoryRepository(database)
+    store = VectorStore(database, build_index(paths.vectors / "memories.faiss", embedder), embedder)
+    index_status = store.open()
+    indexer = Indexer(repository, store)
+    memory = MemoryService(repository, store, indexer, settings=settings.memory)
+
+    log.info(
+        "memory.ready",
+        extra={
+            "model_id": index_status.model_id,
+            "vectors": index_status.vector_count,
+            "pending": memory.pending_count(),
+        },
+    )
+
     app = create_app(
         settings=settings,
         paths=paths,
         database=database,
         os_adapter=os_adapter,
+        memory=memory,
+        indexer=indexer,
+        embedder=embedder,
     )
 
     return Runtime(
@@ -114,5 +147,36 @@ def build_runtime(
         os_adapter=os_adapter,
         database=database,
         redactor=redactor,
+        memory=memory,
+        indexer=indexer,
         app=app,
     )
+
+
+def _select_embedder(paths: Paths) -> EmbeddingProvider:
+    """Pick the best embedding provider available *without* a network call.
+
+    The real model is used when its weights are already on disk. When they are
+    not, the deterministic provider takes over rather than the engine refusing
+    to index — a first run that silently drops every memory's vector, with a
+    backfill nobody knows to wait for, is a far worse failure than degraded
+    recall that repairs itself.
+
+    Nothing is stranded by that choice: the two providers report different
+    `model_id`s, so every vector written by the fallback is automatically stale
+    the moment the real model appears, and the indexer re-embeds without being
+    told (DEC-050).
+    """
+    local = LocalEmbedder(paths.models)
+    if local.is_available():
+        return local
+
+    log.warning(
+        "memory.embedding_model_absent",
+        extra={
+            "model_id": local.descriptor.id,
+            "fallback": "deterministic",
+            "detail": "semantic recall is degraded until the model is downloaded",
+        },
+    )
+    return DeterministicEmbedder()

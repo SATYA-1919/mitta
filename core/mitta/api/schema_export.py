@@ -21,6 +21,11 @@ from typing import Any
 from mitta.api.app import create_app
 from mitta.config.paths import Paths
 from mitta.config.settings import Settings
+from mitta.memory.embedding.deterministic import DeterministicEmbedder
+from mitta.memory.indexer import Indexer
+from mitta.memory.repository import MemoryRepository
+from mitta.memory.service import MemoryService
+from mitta.memory.vectors.store import VectorStore, build_index
 from mitta.os_adapter.mac import MacAdapter
 from mitta.persistence.database import Database
 
@@ -31,17 +36,57 @@ def build_openapi() -> dict[str, Any]:
     Nothing is connected: `create_app` only stores its collaborators, and schema
     generation reads route signatures. Requiring a live database to emit a type
     definition would make the codegen step fail in CI for no reason.
+
+    **Every optional router must be mounted here.** `create_app` omits routers
+    whose collaborators are absent, which is right at runtime and silently wrong
+    for codegen: an unmounted router produces no paths, the generated types lose
+    those endpoints, and nothing fails — the frontend simply cannot see half the
+    API. `assert_complete` below is what turns that into a build error.
     """
     root = Path(tempfile.gettempdir()) / "mitta-schema-export"
     paths = Paths(storage_root=root, runtime_dir=root, log_dir=root)
     settings = Settings(storage_root=root, dev_mode=True)
+    database = Database(paths.database, settings.database)
+
+    embedder = DeterministicEmbedder()
+    repository = MemoryRepository(database)
+    store = VectorStore(database, build_index(paths.vectors / "schema.faiss", embedder), embedder)
     app = create_app(
         settings=settings,
         paths=paths,
-        database=Database(paths.database, settings.database),
+        database=database,
         os_adapter=MacAdapter(),
+        memory=MemoryService(repository, store, Indexer(repository, store)),
+        # No indexer passed to the app: nothing here is connected, and a
+        # background thread writing to an unopened database would be a strange
+        # way to generate a type definition.
+        indexer=None,
+        embedder=embedder,
     )
-    return app.openapi()
+    document: dict[str, Any] = app.openapi()
+    _assert_complete(document)
+    return document
+
+
+# Prefixes the frontend depends on. Listed explicitly so that adding a router
+# and forgetting to mount it here fails the build instead of quietly shrinking
+# the generated types.
+REQUIRED_PATH_PREFIXES = ("/v1/status", "/v1/capabilities", "/v1/memory")
+
+
+def _assert_complete(document: dict[str, Any]) -> None:
+    paths = document.get("paths", {})
+    missing = [
+        prefix
+        for prefix in REQUIRED_PATH_PREFIXES
+        if not any(path.startswith(prefix) for path in paths)
+    ]
+    if missing:
+        raise RuntimeError(
+            f"OpenAPI export is missing {missing}. A router was added without being "
+            f"mounted in schema_export.build_openapi, so the generated TypeScript "
+            f"would silently omit those endpoints."
+        )
 
 
 def main() -> int:

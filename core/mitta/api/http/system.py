@@ -56,9 +56,7 @@ async def status(request: Request, _: RequireToken) -> StatusResponse:
     except Exception as exc:
         schema_version = 0
         healthy = False
-        components.append(
-            ComponentStatus(name="database", state="unavailable", detail=str(exc))
-        )
+        components.append(ComponentStatus(name="database", state="unavailable", detail=str(exc)))
 
     # Landing in later phases. Reported as unavailable rather than omitted, so
     # the UI can distinguish "not built yet" from "silently missing".

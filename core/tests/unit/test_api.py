@@ -135,3 +135,28 @@ def test_errors_use_the_documented_envelope(client: TestClient) -> None:
 
 def test_responses_carry_a_request_id(client: TestClient) -> None:
     assert client.get("/health").headers["X-Request-ID"].startswith("req_")
+
+
+# -- schema export ----------------------------------------------------------- #
+
+
+def test_openapi_export_includes_every_optional_router() -> None:
+    """The generated TypeScript is only as complete as this document.
+
+    `create_app` omits routers whose collaborators are absent — correct at
+    runtime, silently wrong for codegen. An unmounted router produces no paths,
+    the frontend loses those endpoints, and nothing fails.
+    """
+    from mitta.api.schema_export import REQUIRED_PATH_PREFIXES, build_openapi
+
+    paths = build_openapi()["paths"]
+
+    for prefix in REQUIRED_PATH_PREFIXES:
+        assert any(path.startswith(prefix) for path in paths), f"{prefix} missing from OpenAPI"
+
+
+def test_openapi_export_fails_loudly_on_a_missing_router() -> None:
+    from mitta.api import schema_export
+
+    with pytest.raises(RuntimeError, match="missing"):
+        schema_export._assert_complete({"paths": {"/health": {}}})

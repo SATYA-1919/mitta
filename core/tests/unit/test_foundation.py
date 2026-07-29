@@ -186,8 +186,10 @@ def test_descriptor_leaves_no_temporary_file(tmp_path: Path) -> None:
 def test_stale_descriptor_reads_as_absent(tmp_path: Path) -> None:
     """A dead PID must not make a new instance think the port is taken."""
     path = tmp_path / "runtime.json"
-    write_descriptor(path, RuntimeDescriptor(pid=999_999, port=1, host="127.0.0.1",
-                                             api_version="1", started_at=0))
+    write_descriptor(
+        path,
+        RuntimeDescriptor(pid=999_999, port=1, host="127.0.0.1", api_version="1", started_at=0),
+    )
     assert read_descriptor(path) is None
 
 

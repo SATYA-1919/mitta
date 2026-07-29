@@ -65,6 +65,10 @@ class Database:
         self._path = path
         self._settings = settings
         self._write_lock = threading.RLock()
+        # Transaction depth for the calling thread. Thread-local rather than a
+        # plain counter: the indexer writes on a worker thread while the API
+        # reads on another, and only the writer's own reads must be redirected.
+        self._local = threading.local()
         self._write_conn: sqlite3.Connection | None = None
         self._read_pool: queue.LifoQueue[sqlite3.Connection] = queue.LifoQueue(
             maxsize=settings.read_pool_size
@@ -125,9 +129,27 @@ class Database:
 
     @contextmanager
     def read(self) -> Iterator[sqlite3.Connection]:
-        """Borrow a read-only connection from the pool."""
+        """Borrow a connection for reading.
+
+        If the calling thread is inside a write transaction, the *write*
+        connection is handed back instead of one from the pool. This is not an
+        optimisation — it is a correctness requirement.
+
+        Under WAL, a pooled reader sees the last committed snapshot, so a
+        repository method that inserts a row and then reads it back through
+        `read()` finds nothing: the insert is still uncommitted on another
+        connection. That breaks the moment two repository methods compose, which
+        is exactly what `write()` being reentrant invites. Routing reads through
+        the open transaction makes read-your-own-writes hold, so a method behaves
+        the same standalone as it does nested.
+        """
         if self._closed or self._write_conn is None:
             raise StorageError("Database is not connected")
+
+        if getattr(self._local, "depth", 0) > 0:
+            yield self._write_conn
+            return
+
         conn = self._read_pool.get()
         try:
             yield conn
@@ -157,6 +179,7 @@ class Database:
                 yield conn  # join the enclosing transaction
                 return
             conn.execute("BEGIN IMMEDIATE" if immediate else "BEGIN")
+            self._local.depth = getattr(self._local, "depth", 0) + 1
             try:
                 yield conn
             except BaseException:
@@ -164,6 +187,11 @@ class Database:
                 raise
             else:
                 conn.execute("COMMIT")
+            finally:
+                # Cleared before the lock is released, so a later `read()` on
+                # this thread goes back to the pool rather than holding onto a
+                # writer it no longer owns.
+                self._local.depth -= 1
 
     # -- maintenance -------------------------------------------------------- #
 

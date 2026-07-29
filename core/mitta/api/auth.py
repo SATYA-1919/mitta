@@ -77,9 +77,7 @@ class TokenVerifier:
         if origin is None:
             return  # non-browser client; the token remains the control
         if origin not in self._allowed_origins:
-            raise ForbiddenOriginError(
-                "Origin not permitted", details={"origin": origin}
-            )
+            raise ForbiddenOriginError("Origin not permitted", details={"origin": origin})
 
     @staticmethod
     def extract_bearer(header: str | None) -> str | None:

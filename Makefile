@@ -11,7 +11,7 @@ UI      := apps/desktop
 .DEFAULT_GOAL := help
 .PHONY: help venv install install-ui test test-unit test-integration lint typecheck arch \
         check check-ui check-all run clean \
-        ui-dev ui-build ui-test ui-typecheck ui-budget gen-types
+        ui-dev ui-build ui-test ui-typecheck ui-budget gen-types download-model
 
 help:  ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -68,6 +68,9 @@ ui-build:  ## Production bundles
 
 ui-budget: ui-build  ## Enforce the command palette's bundle budget (R2)
 	node scripts/check-palette-budget.mjs
+
+download-model:  ## Fetch the local embedding model (~67 MB, explicit — DEC-050)
+	$(PY) scripts/download-model.py
 
 gen-types:  ## Regenerate frontend types from the Pydantic schemas (DEC-028)
 	./scripts/gen-types.sh

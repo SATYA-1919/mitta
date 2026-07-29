@@ -53,6 +53,207 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/memory": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Browse memories */
+        get: operations["list_memories_v1_memory_get"];
+        put?: never;
+        /**
+         * Store a memory
+         * @description Returns 201 even when the content already existed.
+         *
+         *     `remember` is idempotent on content hash, so a duplicate returns the
+         *     original rather than erroring. A 409 would be technically defensible and
+         *     practically hostile: the caller asked for the fact to be remembered, and it
+         *     is remembered.
+         */
+        post: operations["create_memory_v1_memory_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/memory/maintenance/reindex": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rebuild vectors
+         * @description Drops every vector and re-embeds from SQLite.
+         *
+         *     A failure here propagates rather than being caught: a reindex that cannot
+         *     run because the model is absent must say so, not report success over an
+         *     index it silently left empty.
+         */
+        post: operations["reindex_v1_memory_maintenance_reindex_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/memory/maintenance/sweep": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Run a decay sweep */
+        post: operations["sweep_v1_memory_maintenance_sweep_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/memory/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Hybrid search
+         * @description POST rather than GET.
+         *
+         *     The query is conversational text — it belongs in a body, not in a URL that
+         *     lands in history and access logs. R5 is about what leaves the machine, but
+         *     the same instinct applies to what is written down locally.
+         */
+        post: operations["search_memories_v1_memory_search_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/memory/stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Engine health
+         * @description Reports what is true, including when it is unflattering.
+         *
+         *     `pending_embeddings` above zero and `embedding_degraded` true are both
+         *     normal states the user is entitled to see, rather than a spinner that
+         *     implies work is happening when it cannot.
+         */
+        get: operations["memory_stats_v1_memory_stats_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/memory/{memory_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read one memory */
+        get: operations["get_memory_v1_memory__memory_id__get"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete permanently
+         * @description Irreversible, and the only endpoint that destroys data.
+         *
+         *     Deliberately a separate verb from `forget`: a UI that maps "delete" onto
+         *     this without a confirmation is doing something the user cannot undo, and the
+         *     HTTP method should make that obvious to whoever wires it up.
+         */
+        delete: operations["purge_memory_v1_memory__memory_id__delete"];
+        options?: never;
+        head?: never;
+        /** Edit a memory */
+        patch: operations["update_memory_v1_memory__memory_id__patch"];
+        trace?: never;
+    };
+    "/v1/memory/{memory_id}/correct": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Supersede with a correction
+         * @description The original is kept and linked, never overwritten.
+         *
+         *     "I moved to Bangalore" does not make "I lived in Hyderabad" false — it makes
+         *     it historical, and only one of those is answerable if the row is gone.
+         */
+        post: operations["correct_memory_v1_memory__memory_id__correct_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/memory/{memory_id}/forget": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Demote to forgotten
+         * @description Reversible. The row survives; only its visibility changes.
+         */
+        post: operations["forget_memory_v1_memory__memory_id__forget_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/memory/{memory_id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Undo a forget */
+        post: operations["restore_memory_v1_memory__memory_id__restore_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/status": {
         parameters: {
             query?: never;
@@ -111,6 +312,43 @@ export interface components {
              */
             state: "ok" | "degraded" | "unavailable";
         };
+        /** CreateMemoryRequest */
+        CreateMemoryRequest: {
+            /** Attributes */
+            attributes?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Confidence
+             * @default 1
+             */
+            confidence: number;
+            /** Content */
+            content: string;
+            /** Expires At */
+            expires_at?: number | null;
+            /**
+             * Importance
+             * @default 0.5
+             */
+            importance: number;
+            /** @default long_term */
+            kind: components["schemas"]["MemoryKind"];
+            /**
+             * Pinned
+             * @default false
+             */
+            pinned: boolean;
+            /** Project Id */
+            project_id?: string | null;
+            /** Summary */
+            summary?: string | null;
+        };
+        /** HTTPValidationError */
+        HTTPValidationError: {
+            /** Detail */
+            detail?: components["schemas"]["ValidationError"][];
+        };
         /**
          * HealthResponse
          * @description Liveness only. Deliberately carries nothing sensitive — this endpoint is
@@ -128,6 +366,144 @@ export interface components {
             /** Uptime Seconds */
             uptime_seconds: number;
         };
+        /**
+         * MemoryKind
+         * @enum {string}
+         */
+        MemoryKind: "long_term" | "project" | "episodic" | "relationship" | "preference" | "procedural";
+        /** MemoryListResponse */
+        MemoryListResponse: {
+            /** Limit */
+            limit: number;
+            /** Memories */
+            memories: components["schemas"]["MemoryResource"][];
+            /** Offset */
+            offset: number;
+            /** Total */
+            total: number;
+        };
+        /**
+         * MemoryResource
+         * @description A memory as the UI sees it.
+         */
+        MemoryResource: {
+            /** Access Count */
+            access_count: number;
+            /** Attributes */
+            attributes: {
+                [key: string]: unknown;
+            };
+            /** Confidence */
+            confidence: number;
+            /** Content */
+            content: string;
+            /** Created At */
+            created_at: number;
+            /** Expires At */
+            expires_at: number | null;
+            /** Id */
+            id: string;
+            /** Importance */
+            importance: number;
+            kind: components["schemas"]["MemoryKind"];
+            /** Last Accessed At */
+            last_accessed_at: number | null;
+            /** Pinned */
+            pinned: boolean;
+            /** Project Id */
+            project_id: string | null;
+            source_kind: components["schemas"]["SourceKind"];
+            status: components["schemas"]["MemoryStatus"];
+            /** Summary */
+            summary: string | null;
+            /** Superseded By */
+            superseded_by: string | null;
+            /** Updated At */
+            updated_at: number;
+        };
+        /** MemoryStatsResponse */
+        MemoryStatsResponse: {
+            /** Active */
+            active: number;
+            /** Dim */
+            dim: number;
+            /** Embedding Degraded */
+            embedding_degraded: boolean;
+            /** Embedding Model Downloaded */
+            embedding_model_downloaded: boolean;
+            /** Embedding Model Id */
+            embedding_model_id: string;
+            /** Index Consistent */
+            index_consistent: boolean;
+            /** Index Name */
+            index_name: string;
+            /** Model Id */
+            model_id: string;
+            /** Pending Embeddings */
+            pending_embeddings: number;
+            /** Total */
+            total: number;
+            /** Vectors Indexed */
+            vectors_indexed: number;
+        };
+        /**
+         * MemoryStatus
+         * @enum {string}
+         */
+        MemoryStatus: "active" | "superseded" | "forgotten";
+        /** SearchHitResource */
+        SearchHitResource: {
+            /** Keyword Rank */
+            keyword_rank: number | null;
+            /** Matched Both */
+            matched_both: boolean;
+            memory: components["schemas"]["MemoryResource"];
+            /** Score */
+            score: number;
+            /** Vector Rank */
+            vector_rank: number | null;
+        };
+        /** SearchRequest */
+        SearchRequest: {
+            /**
+             * Keyword
+             * @default true
+             */
+            keyword: boolean;
+            /**
+             * Limit
+             * @default 10
+             */
+            limit: number;
+            /** Project Id */
+            project_id?: string | null;
+            /** Query */
+            query: string;
+            /**
+             * Record Access
+             * @default true
+             */
+            record_access: boolean;
+            /**
+             * Semantic
+             * @default true
+             */
+            semantic: boolean;
+        };
+        /** SearchResponse */
+        SearchResponse: {
+            /** Hits */
+            hits: components["schemas"]["SearchHitResource"][];
+            /** Query */
+            query: string;
+            /** Semantic Available */
+            semantic_available: boolean;
+        };
+        /**
+         * SourceKind
+         * @enum {string}
+         */
+        SourceKind: "conversation" | "tool" | "user" | "import" | "consolidation";
         /**
          * StatusResponse
          * @description Readiness. `ready` false means the process is up but cannot serve a turn.
@@ -147,6 +523,47 @@ export interface components {
             storage_root: string;
             /** Uptime Seconds */
             uptime_seconds: number;
+        };
+        /** SweepResponse */
+        SweepResponse: {
+            /** Decayed */
+            decayed: number;
+            /** Examined */
+            examined: number;
+            /** Expired */
+            expired: number;
+        };
+        /** UpdateMemoryRequest */
+        UpdateMemoryRequest: {
+            /** Attributes */
+            attributes?: {
+                [key: string]: unknown;
+            } | null;
+            /** Confidence */
+            confidence?: number | null;
+            /** Content */
+            content?: string | null;
+            /** Expires At */
+            expires_at?: number | null;
+            /** Importance */
+            importance?: number | null;
+            /** Pinned */
+            pinned?: boolean | null;
+            /** Summary */
+            summary?: string | null;
+        };
+        /** ValidationError */
+        ValidationError: {
+            /** Context */
+            ctx?: Record<string, never>;
+            /** Input */
+            input?: unknown;
+            /** Location */
+            loc: (string | number)[];
+            /** Message */
+            msg: string;
+            /** Error Type */
+            type: string;
         };
     };
     responses: never;
@@ -193,6 +610,360 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CapabilitiesResponse"];
+                };
+            };
+        };
+    };
+    list_memories_v1_memory_get: {
+        parameters: {
+            query?: {
+                kind?: components["schemas"]["MemoryKind"] | null;
+                project_id?: string | null;
+                status?: components["schemas"]["MemoryStatus"];
+                pinned_only?: boolean;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_memory_v1_memory_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateMemoryRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryResource"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reindex_v1_memory_maintenance_reindex_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryStatsResponse"];
+                };
+            };
+        };
+    };
+    sweep_v1_memory_maintenance_sweep_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SweepResponse"];
+                };
+            };
+        };
+    };
+    search_memories_v1_memory_search_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SearchRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SearchResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    memory_stats_v1_memory_stats_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryStatsResponse"];
+                };
+            };
+        };
+    };
+    get_memory_v1_memory__memory_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                memory_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryResource"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    purge_memory_v1_memory__memory_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                memory_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_memory_v1_memory__memory_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                memory_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateMemoryRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryResource"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    correct_memory_v1_memory__memory_id__correct_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                memory_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateMemoryRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryResource"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    forget_memory_v1_memory__memory_id__forget_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                memory_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryResource"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    restore_memory_v1_memory__memory_id__restore_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                memory_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryResource"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

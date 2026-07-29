@@ -32,14 +32,14 @@ _MIN_LITERAL_LENGTH: Final = 8
 
 _PATTERNS: Final[tuple[re.Pattern[str], ...]] = (
     # Provider-specific key formats, most specific first.
-    re.compile(r"\bgsk_[A-Za-z0-9]{16,}\b"),                      # Groq
-    re.compile(r"\bsk-or-v1-[A-Za-z0-9]{16,}\b"),                 # OpenRouter
-    re.compile(r"\bsk-ant-[A-Za-z0-9_\-]{16,}\b"),                # Anthropic
-    re.compile(r"\bsk-proj-[A-Za-z0-9_\-]{16,}\b"),               # OpenAI project
-    re.compile(r"\bsk-[A-Za-z0-9]{20,}\b"),                       # OpenAI classic
-    re.compile(r"\bAIza[A-Za-z0-9_\-]{20,}\b"),                   # Google
-    re.compile(r"\bgh[pousr]_[A-Za-z0-9]{16,}\b"),                # GitHub
-    re.compile(r"\bxox[baprs]-[A-Za-z0-9\-]{10,}\b"),             # Slack
+    re.compile(r"\bgsk_[A-Za-z0-9]{16,}\b"),  # Groq
+    re.compile(r"\bsk-or-v1-[A-Za-z0-9]{16,}\b"),  # OpenRouter
+    re.compile(r"\bsk-ant-[A-Za-z0-9_\-]{16,}\b"),  # Anthropic
+    re.compile(r"\bsk-proj-[A-Za-z0-9_\-]{16,}\b"),  # OpenAI project
+    re.compile(r"\bsk-[A-Za-z0-9]{20,}\b"),  # OpenAI classic
+    re.compile(r"\bAIza[A-Za-z0-9_\-]{20,}\b"),  # Google
+    re.compile(r"\bgh[pousr]_[A-Za-z0-9]{16,}\b"),  # GitHub
+    re.compile(r"\bxox[baprs]-[A-Za-z0-9\-]{10,}\b"),  # Slack
     # Authorization headers in any casing.
     re.compile(r"(?i)\b(bearer|basic)\s+[A-Za-z0-9._~+/=\-]{12,}"),
     # key-ish assignment in any common syntax:

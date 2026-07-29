@@ -75,14 +75,39 @@ def test_nested_write_joins_the_outer_transaction(migrated: Database) -> None:
         assert conn.execute("SELECT COUNT(*) FROM app_settings").fetchone()[0] == 0
 
 
+def test_read_inside_a_write_sees_uncommitted_rows(migrated: Database) -> None:
+    """Read-your-own-writes must hold inside an open transaction.
+
+    A pooled reader is on a different connection and, under WAL, sees only the
+    last committed snapshot — so a repository method that inserts and then reads
+    back through `read()` would find nothing. Harmless standalone, fatal the
+    moment two such methods compose, which is precisely what reentrant `write()`
+    exists to allow.
+    """
+    with migrated.write() as conn:
+        conn.execute("INSERT INTO app_settings (key, value, updated_at) VALUES ('k','\"v\"',1)")
+
+        with migrated.read() as reader:
+            row = reader.execute("SELECT value FROM app_settings WHERE key='k'").fetchone()
+            assert row[0] == '"v"'
+
+
+def test_reads_return_to_the_pool_after_the_transaction(migrated: Database) -> None:
+    """The write-connection redirect must not outlive the transaction."""
+    with migrated.write() as conn:
+        conn.execute("INSERT INTO app_settings (key, value, updated_at) VALUES ('k','\"v\"',1)")
+
+    with migrated.read() as reader:
+        assert reader.execute("PRAGMA query_only").fetchone()[0] == 1
+
+
 # -- schema ----------------------------------------------------------------- #
 
 
 def test_migration_creates_expected_tables(migrated: Database) -> None:
     with migrated.read() as conn:
         names = {
-            row[0]
-            for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
         }
     for expected in (
         "memories",
@@ -172,12 +197,18 @@ def test_fts_index_tracks_memories(migrated: Database) -> None:
     with migrated.write() as conn:
         conn.execute("UPDATE memories SET content='now about OAuth' WHERE id='mem_f'")
     with migrated.read() as conn:
-        assert conn.execute(
-            "SELECT COUNT(*) FROM memories_fts WHERE memories_fts MATCH 'PKCE'"
-        ).fetchone()[0] == 0
-        assert conn.execute(
-            "SELECT COUNT(*) FROM memories_fts WHERE memories_fts MATCH 'OAuth'"
-        ).fetchone()[0] == 1
+        assert (
+            conn.execute(
+                "SELECT COUNT(*) FROM memories_fts WHERE memories_fts MATCH 'PKCE'"
+            ).fetchone()[0]
+            == 0
+        )
+        assert (
+            conn.execute(
+                "SELECT COUNT(*) FROM memories_fts WHERE memories_fts MATCH 'OAuth'"
+            ).fetchone()[0]
+            == 1
+        )
 
 
 def test_index_health_view_reports_pending_embeddings(migrated: Database) -> None:
