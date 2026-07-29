@@ -208,7 +208,10 @@ function RightCluster() {
 
   const indexed = stats?.vectors_indexed ?? 0;
   const pending = stats?.pending_embeddings ?? 0;
-  const coverage = indexed + pending > 0 ? indexed / (indexed + pending) : 1;
+  const total = indexed + pending;
+  // Nothing indexed is not "100% indexed". A full ring over zero vectors is
+  // exactly the fabricated reading the rest of this file refuses to show.
+  const coverage = total > 0 ? indexed / total : 0;
 
   return (
     <aside className="hidden w-[172px] shrink-0 flex-col items-center gap-5 border-l border-accent/15 py-6 xl:flex">
@@ -216,7 +219,7 @@ function RightCluster() {
         value={coverage}
         label="INDEX"
         size={104}
-        sublabel={`${indexed} vectors`}
+        sublabel={stats === null ? 'no data' : `${indexed} vectors`}
         tone={stats?.index_consistent === false ? 'warning' : 'accent'}
       />
 

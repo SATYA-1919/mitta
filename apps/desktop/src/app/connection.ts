@@ -13,6 +13,7 @@ import {
   getRuntimeInfo,
   isTauriAvailable,
   onMetrics,
+  type RuntimeInfo,
   ShellUnavailableError,
 } from '@/lib/ipc/tauri';
 import { TransportClient } from '@/lib/transport/socket';
@@ -26,21 +27,80 @@ export interface Connection {
   dispose: () => void;
 }
 
+/**
+ * Render whatever `invoke` rejected with.
+ *
+ * Tauri rejects with the *serialised* error, so `ShellError` arrives as
+ * `{code, message, retryable}` — and `String(...)` on that yields
+ * `[object Object]`, which is what reached the screen and cost a round-trip to
+ * diagnose. The whole point of the detail line is that it says something.
+ */
+function describe(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === 'string') return error;
+  if (typeof error === 'object' && error !== null) {
+    const shaped = error as { message?: unknown; code?: unknown };
+    if (typeof shaped.message === 'string') {
+      return typeof shaped.code === 'string'
+        ? `${shaped.message} (${shaped.code})`
+        : shaped.message;
+    }
+    try {
+      return JSON.stringify(error);
+    } catch {
+      return 'unknown error';
+    }
+  }
+  return String(error);
+}
+
+/** How long to keep waiting for the sidecar before reporting failure. */
+const READY_TIMEOUT_MS = 45_000;
+const RETRY_INTERVAL_MS = 400;
+
+/**
+ * Wait for the sidecar, rather than asking once and giving up.
+ *
+ * The shell spawns the sidecar and the webview loads in parallel, and the
+ * sidecar takes seconds to be ready — migrations, the FAISS index, the
+ * embedding model. Asking once at mount reliably arrives first and gets
+ * `sidecar.unavailable`, after which nothing ever tries again. The window then
+ * sits on "not connected" beside a backend that came up fine moments later.
+ *
+ * Polling rather than waiting on the `sidecar:state` event because this must
+ * also work when the event was emitted *before* the webview subscribed, which
+ * is the common case for a fast start.
+ */
+async function awaitRuntime(): Promise<RuntimeInfo> {
+  const deadline = Date.now() + READY_TIMEOUT_MS;
+
+  for (;;) {
+    try {
+      return await getRuntimeInfo();
+    } catch (error) {
+      // A missing shell will never resolve by waiting.
+      if (error instanceof ShellUnavailableError) throw error;
+      if (Date.now() >= deadline) throw error;
+      useStore.getState().setConnection('connecting', 'waiting for the MITTA backend…');
+      await new Promise((resolve) => setTimeout(resolve, RETRY_INTERVAL_MS));
+    }
+  }
+}
+
 export async function connect(): Promise<Connection | null> {
   const store = useStore.getState();
 
-  let runtime;
+  let runtime: RuntimeInfo;
   try {
-    runtime = await getRuntimeInfo();
+    runtime = await awaitRuntime();
   } catch (error) {
-    // Distinguish the three reasons this fails, because they need different
-    // fixes and "Disconnected" sent debugging to the wrong place twice.
-    const inShell = isTauriAvailable();
-    const detail = inShell
-      ? `Shell present but IPC failed — check the CSP allows ipc: (${String(error)})`
+    // Distinguish the reasons, because they need different fixes and
+    // "Disconnected" sent debugging to the wrong place three times.
+    const detail = isTauriAvailable()
+      ? `Shell present, IPC failed: ${describe(error)}`
       : error instanceof ShellUnavailableError
-        ? 'Running in a browser without VITE_MITTA_* — use `make dev`, or `make app` for the desktop window'
-        : String(error);
+        ? 'No shell and no VITE_MITTA_* — use `make app` for the window, or `make dev` for the browser'
+        : describe(error);
     store.setConnection('closed', detail);
     return null;
   }

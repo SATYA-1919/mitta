@@ -38,6 +38,26 @@ const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
 pub fn run() {
     let dev_mode = cfg!(debug_assertions);
 
+    // Without this, every `log::info!` and `log::warn!` in the supervisor goes
+    // nowhere. That is not a cosmetic gap: it meant the shell could fail to
+    // spawn or restart the sidecar and say nothing at all, and three separate
+    // connection bugs were diagnosed from the Python side's output alone
+    // because the Rust side was silent.
+    //
+    // stderr rather than a file: the shell is launched from a terminal in
+    // development and Console.app captures it in a bundle, and a log the
+    // supervisor writes while the supervisor is the thing failing should not
+    // depend on the filesystem.
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(if dev_mode {
+        "info"
+    } else {
+        "warn"
+    }))
+    .format_timestamp_secs()
+    .init();
+
+    log::info!("MITTA shell starting (dev_mode={dev_mode})");
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())

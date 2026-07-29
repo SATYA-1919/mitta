@@ -2441,3 +2441,42 @@ only, while the docstring above it described the ceiling. `write_note` was
 therefore never offered at all. The second time in this project that a string
 replacement did not take and nothing failed; both times the symptom was a
 capability quietly not existing.
+
+
+---
+
+## DEC-099 — The webview waits for the sidecar instead of asking once
+
+**The bug.** The shell spawns the sidecar and loads the webview in parallel. The
+sidecar takes roughly three seconds to be ready — migrations, the FAISS index,
+the embedding model. `connect()` ran once at mount, arrived first, got
+`sidecar.unavailable`, and **never tried again**. The window then sat on "not
+connected" beside a backend that came up fine moments later.
+
+**Decision.** `awaitRuntime()` polls until the sidecar answers, up to 45
+seconds, showing "waiting for the MITTA backend…" meanwhile. A
+`ShellUnavailableError` breaks out immediately — a missing shell will not
+resolve by waiting.
+
+Polling rather than subscribing to the `sidecar:state` event, because the event
+can be emitted *before* the webview subscribes, which is the common case on a
+fast start. A listener that misses its event waits forever.
+
+**Two things this bug hid behind.**
+
+`[object Object]` on screen. Tauri rejects with the *serialised* error, so
+`ShellError` arrives as `{code, message, retryable}` and `String(...)` on it
+produces nothing useful. The detail line exists to say something; `describe()`
+now unwraps it. That cost a round-trip to diagnose.
+
+**The Rust shell had no logger at all.** Every `log::info!` and `log::warn!` in
+the supervisor went nowhere. Three separate connection defects were diagnosed
+from the Python side's output alone, because the component that owns the
+sidecar's lifetime was silent about it. With `env_logger` wired up, the first
+run immediately printed `sidecar ready on port 59909` at t+3s — which is the
+whole bug, stated plainly, in a line that had been written months of commits
+ago and never reached a terminal.
+
+**Also.** The index gauge showed **100** with zero vectors, because coverage
+divided by a total of zero and fell back to `1`. A full ring over nothing is
+precisely the fabricated reading the rest of that file refuses to show.
