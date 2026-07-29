@@ -12,6 +12,27 @@ export type StatusResponse = components['schemas']['StatusResponse'];
 export type CapabilitiesResponse = components['schemas']['CapabilitiesResponse'];
 export type ComponentStatus = components['schemas']['ComponentStatus'];
 
+export type Memory = components['schemas']['MemoryResource'];
+export type MemoryKind = components['schemas']['MemoryKind'];
+export type MemoryStatus = components['schemas']['MemoryStatus'];
+export type MemoryList = components['schemas']['MemoryListResponse'];
+export type MemoryStats = components['schemas']['MemoryStatsResponse'];
+export type SearchResponse = components['schemas']['SearchResponse'];
+export type SearchHit = components['schemas']['SearchHitResource'];
+export type CreateMemoryRequest = components['schemas']['CreateMemoryRequest'];
+export type UpdateMemoryRequest = components['schemas']['UpdateMemoryRequest'];
+export type SearchRequest = components['schemas']['SearchRequest'];
+export type SweepResponse = components['schemas']['SweepResponse'];
+
+export interface ListMemoriesParams {
+  kind?: MemoryKind;
+  projectId?: string;
+  status?: MemoryStatus;
+  pinnedOnly?: boolean;
+  limit?: number;
+  offset?: number;
+}
+
 /** The error envelope every failure uses (API_DESIGN.md §5). */
 export interface ApiErrorBody {
   error: {
@@ -125,6 +146,69 @@ export class ApiClient {
 
   capabilities(): Promise<CapabilitiesResponse> {
     return this.get<CapabilitiesResponse>('/v1/capabilities');
+  }
+
+  // -- memory ---------------------------------------------------------------
+
+  listMemories(params: ListMemoriesParams = {}): Promise<MemoryList> {
+    const query = new URLSearchParams();
+    if (params.kind !== undefined) query.set('kind', params.kind);
+    if (params.projectId !== undefined) query.set('project_id', params.projectId);
+    if (params.status !== undefined) query.set('status', params.status);
+    if (params.pinnedOnly === true) query.set('pinned_only', 'true');
+    if (params.limit !== undefined) query.set('limit', String(params.limit));
+    if (params.offset !== undefined) query.set('offset', String(params.offset));
+    const suffix = query.size > 0 ? `?${query.toString()}` : '';
+    return this.get<MemoryList>(`/v1/memory${suffix}`);
+  }
+
+  getMemory(id: string): Promise<Memory> {
+    return this.get<Memory>(`/v1/memory/${encodeURIComponent(id)}`);
+  }
+
+  createMemory(body: CreateMemoryRequest): Promise<Memory> {
+    return this.post<Memory>('/v1/memory', body);
+  }
+
+  /**
+   * Search is a POST because the query is conversational text. A GET would put
+   * it in a URL, and therefore in history and access logs — the same instinct
+   * behind R5, applied to what gets written down locally.
+   */
+  searchMemories(body: SearchRequest): Promise<SearchResponse> {
+    return this.post<SearchResponse>('/v1/memory/search', body);
+  }
+
+  updateMemory(id: string, body: UpdateMemoryRequest): Promise<Memory> {
+    return this.request<Memory>(`/v1/memory/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    });
+  }
+
+  forgetMemory(id: string): Promise<Memory> {
+    return this.post<Memory>(`/v1/memory/${encodeURIComponent(id)}/forget`);
+  }
+
+  restoreMemory(id: string): Promise<Memory> {
+    return this.post<Memory>(`/v1/memory/${encodeURIComponent(id)}/restore`);
+  }
+
+  /** Irreversible. `forgetMemory` is the reversible one (DEC-053). */
+  async purgeMemory(id: string): Promise<void> {
+    await this.request<null>(`/v1/memory/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  }
+
+  memoryStats(): Promise<MemoryStats> {
+    return this.get<MemoryStats>('/v1/memory/stats');
+  }
+
+  sweepMemories(): Promise<SweepResponse> {
+    return this.post<SweepResponse>('/v1/memory/maintenance/sweep');
+  }
+
+  reindexMemories(): Promise<MemoryStats> {
+    return this.post<MemoryStats>('/v1/memory/maintenance/reindex');
   }
 }
 

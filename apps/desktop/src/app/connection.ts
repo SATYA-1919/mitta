@@ -11,6 +11,7 @@
 import { ApiClient } from '@/lib/api/client';
 import { getRuntimeInfo, onMetrics, ShellUnavailableError } from '@/lib/ipc/tauri';
 import { TransportClient } from '@/lib/transport/socket';
+import { useMemoryStore } from '@/state/memory';
 import { bindTransport } from '@/state/sync';
 import { useStore } from '@/state/store';
 
@@ -61,12 +62,17 @@ export async function connect(): Promise<Connection | null> {
     useStore.getState().setMetrics(metrics);
   });
 
+  // Server-owned state gets its own store fed by the same client, rather than
+  // a second client with its own token handling (DEC-018).
+  useMemoryStore.getState().attach(api);
+
   return {
     api,
     transport,
     dispose: () => {
       unbind();
       unlistenMetrics();
+      useMemoryStore.getState().attach(null);
       transport.close();
     },
   };

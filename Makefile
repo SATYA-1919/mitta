@@ -11,7 +11,7 @@ UI      := apps/desktop
 .DEFAULT_GOAL := help
 .PHONY: help venv install install-ui test test-unit test-integration lint typecheck arch \
         check check-ui check-all run clean \
-        ui-dev ui-build ui-test ui-typecheck ui-budget gen-types download-model
+        dev dev-real ui-dev ui-build ui-test ui-typecheck ui-budget gen-types download-model
 
 help:  ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -54,7 +54,13 @@ check: lint typecheck arch test  ## Backend: everything CI runs
 install-ui:  ## Install frontend dependencies
 	cd $(UI) && npm install
 
-ui-dev:  ## Vite dev server
+dev:  ## Run sidecar + UI together on a scratch storage root
+	./scripts/dev.sh
+
+dev-real:  ## Same, against your real MITTA data
+	./scripts/dev.sh --real-storage
+
+ui-dev:  ## Vite dev server alone (needs a sidecar already running)
 	cd $(UI) && npm run dev
 
 ui-typecheck:  ## tsc --noEmit, strict

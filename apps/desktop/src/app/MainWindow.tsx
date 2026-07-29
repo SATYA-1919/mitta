@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 
 import { Sidebar, SURFACES } from '@/components/layout/Sidebar';
+import { MemorySurface } from '@/components/memory/MemorySurface';
 import { StatusBar } from '@/components/layout/StatusBar';
 import { EmptyState, Panel } from '@/components/ui/primitives';
 import { displayText, useStore } from '@/state/store';
@@ -44,8 +45,10 @@ export function MainWindow() {
           <h1 className="text-sm font-medium capitalize text-fg-secondary">{surface}</h1>
         </header>
 
-        <div className="scrollable min-h-0 flex-1">
-          {surface === 'chat' ? <ChatSurface /> : <PendingSurface name={surface} />}
+        <div className="min-h-0 flex-1">
+          {surface === 'chat' && <ChatSurface />}
+          {surface === 'memory' && <MemorySurface />}
+          {surface !== 'chat' && surface !== 'memory' && <PendingSurface name={surface} />}
         </div>
 
         <StatusBar />

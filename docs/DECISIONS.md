@@ -1254,3 +1254,78 @@ silent data-loss bug that surfaces months later as "why doesn't search find
 this". The schema cannot catch it; the `CHECK (json_valid(...))` constraint only
 verifies it is JSON. This is the layer that can, and `extra="forbid"` is what
 makes a typo an error instead of a shrug.
+
+
+---
+
+## DEC-055 — The dev server proxies the API instead of the browser calling the sidecar
+
+**Problem.** Found by running `scripts/dev.sh`, not by reading the code. The
+browser would have been blocked outright, and the failure would have looked like
+a bug in the frontend.
+
+Two things collided:
+
+1. Vite binds `localhost`, which resolves to `::1` on macOS. The sidecar binds
+   `127.0.0.1`. Two loopbacks, two origins.
+2. The sidecar ships **no CORS middleware on purpose** — in the shipped
+   application the only client is the Tauri webview, which is same-origin
+   through the shell, so CORS would only be adding a way in (`api/app.py`).
+
+So a page on `http://localhost:1420` calling `http://127.0.0.1:<port>` is
+cross-origin against a server that will never send an `Access-Control-Allow-*`
+header. Nothing would have worked.
+
+**Decision.** Vite proxies `/v1` and `/health` to the sidecar, and
+`getRuntimeInfo`'s dev fallback returns the **page's own origin** as `baseUrl`.
+The server also binds `127.0.0.1` explicitly rather than whatever `localhost`
+resolves to today.
+
+**Why this and not CORS.** Adding CORS for development means the shipped binary
+carries a header policy it does not need, and the tempting `allow_origins=["*"]`
+in a dev branch is exactly how a loopback API becomes reachable from any page
+the user visits. Proxying keeps the production posture untouched: every request
+is same-origin in both environments, so the client code above `getRuntimeInfo`
+is byte-identical in dev and in the shell.
+
+---
+
+## DEC-056 — The dev session token is generated per run, never committed
+
+**Decision.** `scripts/dev.sh` mints a fresh `secrets.token_urlsafe(32)` on each
+start, writes it to `apps/desktop/.env.local`, and deletes that file on exit.
+The file is gitignored.
+
+**Why.** In the real application Rust generates the token at spawn and hands it
+to the webview over IPC. Something has to play that part in development, and the
+obvious shortcut — a fixed `dev-token` in the repo — is a credential in the
+source tree, which DEC-017 forbids. "It is only for development" is what is said
+about every credential that later turns out not to be.
+
+Deleting it on exit matters too: a stale token sitting in the working tree
+between sessions is a live credential for anyone who can read the checkout, and
+it is exactly the kind of file that gets `git add -A`'d by accident.
+
+---
+
+## DEC-057 — The memory UI shows its own machinery
+
+**Decision.** The memory surface displays which index matched each result
+(`meaning #1` / `keyword #3`), how many vectors are pending, whether the
+embedding provider is the fallback, and whether the index is consistent.
+
+**Why.** R5's enforcement clause says anything the user cannot inspect they
+cannot trust, and memory is the component where that matters most — it is the
+part of the system that decides what MITTA knows about someone.
+
+The concrete payoff: when recall is poor, the difference between "the model is
+not downloaded" and "this genuinely is not in your memory" is the difference
+between a forty-second fix and a user concluding the product does not work. A
+status bar that hid the fallback would produce the second outcome every time.
+
+**Server state is not patched optimistically.** Every mutation re-reads. The
+server applies rules the client does not know — a pinned memory refuses to be
+forgotten (DEC-053) — so a local patch can display a state the database never
+entered. Deletion is two-step for the same reason: `purge` is the one
+irreversible operation in the engine, and a single-click delete on a list row is
+how someone loses a memory they meant to keep.

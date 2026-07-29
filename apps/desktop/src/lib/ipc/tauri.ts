@@ -74,10 +74,15 @@ export class ShellUnavailableError extends Error {
 /**
  * Fetch the sidecar port and session token.
  *
- * Outside the shell, falls back to Vite env vars so `npm run dev` can point at a
- * manually started sidecar. There is no default token: a hardcoded one would be
- * a credential in the source tree, which DEC-017 forbids regardless of how
+ * Outside the shell, falls back to what `scripts/dev.sh` put in the
+ * environment. There is no default token: a hardcoded one would be a credential
+ * in the source tree, which DEC-017 forbids regardless of how
  * development-only it claims to be.
+ *
+ * The dev `baseUrl` is the **page's own origin**, not the sidecar's. Vite
+ * proxies `/v1` and `/health` through to it, so requests are same-origin and no
+ * CORS is needed — the sidecar ships none on purpose. Everything above this
+ * function is therefore identical in dev and in the shell.
  */
 export async function getRuntimeInfo(): Promise<RuntimeInfo> {
   if (isTauriAvailable()) {
@@ -85,14 +90,15 @@ export async function getRuntimeInfo(): Promise<RuntimeInfo> {
   }
 
   const env = import.meta.env;
-  const baseUrl = env['VITE_MITTA_BASE_URL'];
   const token = env['VITE_MITTA_TOKEN'];
-  if (typeof baseUrl !== 'string' || typeof token !== 'string') {
+  if (typeof token !== 'string' || typeof env['VITE_MITTA_BASE_URL'] !== 'string') {
     throw new ShellUnavailableError('get_runtime_info');
   }
+
+  const origin = globalThis.location.origin;
   return {
-    baseUrl,
-    wsUrl: `${baseUrl.replace(/^http/, 'ws')}/v1/ws`,
+    baseUrl: origin,
+    wsUrl: `${origin.replace(/^http/, 'ws')}/v1/ws`,
     token,
     apiVersion: '1',
   };

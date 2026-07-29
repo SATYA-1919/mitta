@@ -37,6 +37,13 @@ node_modules/
 *.tsbuildinfo
 apps/desktop/dist/
 
+# Generated per dev run by scripts/dev.sh and deleted on exit. Holds a live
+# session token, so it must never be committed even transiently.
+apps/desktop/.env.local
+
+# Scratch storage root + sidecar log for `make dev`.
+.dev/
+
 # Intermediate codegen artefact. The generated TypeScript IS committed (so the
 # frontend builds without a Python environment); this is just the step between.
 core/openapi.json
