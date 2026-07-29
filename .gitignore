@@ -30,6 +30,7 @@ build/
 target/
 apps/desktop/src-tauri/target/
 apps/desktop/src-tauri/gen/
+apps/desktop/src-tauri/gen/
 
 # ── Node / frontend ─────────────────────────────────────────────────────
 node_modules/

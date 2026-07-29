@@ -1329,3 +1329,116 @@ forgotten (DEC-053) — so a local patch can display a state the database never
 entered. Deletion is two-step for the same reason: `purge` is the one
 irreversible operation in the engine, and a single-click delete on a list row is
 how someone loses a memory they meant to keep.
+
+
+---
+---
+
+# Phase 4b — Tauri Shell
+
+---
+
+## DEC-058 — CORS is required, and the earlier reasoning was wrong
+
+**What the code said.** `api/app.py` carried this comment since Phase 3:
+
+> No CORS middleware. The only legitimate client is the Tauri webview, which is
+> same-origin through the shell; adding CORS would be adding a way in.
+
+**What is actually true.** Tauri serves the frontend from `tauri://localhost`
+(and from `http://127.0.0.1:1420` under `devUrl`). The sidecar listens on
+`http://127.0.0.1:<ephemeral>`. Every request from the webview is cross-origin.
+
+Running the shell for the first time proved it: the preflight was answered
+`405 Method Not Allowed`, and no response carried `Access-Control-Allow-Origin`.
+The browser would have blocked every request. **Nothing would have worked**, and
+the failure would have presented as a broken frontend rather than as a
+misconfigured server.
+
+**Decision.** A CORS middleware with an explicit allowlist —
+`settings.allowed_origins`, plus the Vite dev origin when `dev_mode` is set.
+`allow_credentials` stays off, because the session token travels in the
+`Authorization` header and never in a cookie.
+
+**Why this is not the hole the old comment feared.** The allowlist grants
+nothing that the loopback bind, the 256-bit session token and the WebSocket
+origin check did not already gate. It stops the browser blocking the one client
+that is supposed to work, and it continues to block every other origin — a page
+the user happens to visit can reach the port but cannot read a single response.
+The dangerous configuration is `allow_origins=["*"]` with
+`allow_credentials=True`, and this is the opposite of that.
+
+The lesson is the comment, not the code. A confident security rationale written
+against an untested assumption is worse than no comment, because it discourages
+exactly the check that would have caught it.
+
+---
+
+## DEC-059 — The supervisor restarts on elapsed time, not on attempt count
+
+**Problem.** "Restart the sidecar if it dies, but give up if it is
+crash-looping" needs a definition of crash-looping.
+
+**Decision.** `Backoff::record_exit` takes how long the run lasted. A run of at
+least 30 seconds resets the counter; the counter is what triggers giving up.
+
+**Why.** Counting attempts alone conflates two situations that need opposite
+responses: a process that fails five times in ten seconds is broken and should
+be left alone, while a process that runs for an hour and then dies is one that
+should simply be restarted. Attempt-counting would refuse to restart the second
+one after five such days, and the user would find MITTA silently dead one
+morning with no explanation.
+
+Split into its own module so the policy is tested as arithmetic. Testing restart
+logic through real subprocesses is testing it slowly and flakily.
+
+---
+
+## DEC-060 — No command returns an API key
+
+**Decision.** `secrets.rs` exposes `store`, `has` and `delete`. There is no
+`get`. The one function that reads a value, `read_for_sidecar`, is `pub(crate)`
+and is never listed in `generate_handler!`.
+
+**Why.** Not because the webview is untrusted in the usual sense, but because
+the webview renders model output. A value that can be read into JavaScript is a
+value that can reach a DOM node, a console line, a crash report or a screenshot.
+Never reading it back removes the entire class of exposure rather than
+mitigating it case by case.
+
+The provider name is an allowlist for the same reason a path would be: it
+becomes a Keychain account, and an unvalidated one lets a caller write arbitrary
+items into the user's Keychain under MITTA's service name.
+
+---
+
+## DEC-061 — The readiness parser is deliberately unforgiving
+
+**Decision.** `parse_ready_line` accepts exactly `MITTA_READY <port>` with a
+port in 1..=65535. Trailing tokens, port 0, and anything else are rejected.
+
+**Why.** A misparse does not fail safe. The shell would hand the webview a port
+belonging to some other process on the machine, along with MITTA's session
+token — authenticating to a stranger with a real credential. Refusing to guess
+is the only behaviour with an acceptable worst case.
+
+The read runs on a worker thread with a 30-second timeout for a related reason:
+a sidecar that hangs before printing anything would otherwise hang the whole
+application at launch, with no window and nothing on screen to explain why.
+
+---
+
+## DEC-062 — Closing the main window does not quit MITTA
+
+**Decision.** `CloseRequested` on the main window is intercepted; the window
+hides. The application exits from the tray or ⌘Q, and only then is the sidecar
+shut down with SIGTERM and a five-second grace period.
+
+**Why.** MITTA is resident — it has a tray item, a global hotkey and background
+work (indexing, consolidation, scheduled tasks). Quitting on window close would
+kill all of it, and the user would have no way to know that closing a window
+stopped their memory being indexed.
+
+SIGTERM before SIGKILL matters more than it looks: the sidecar owns the SQLite
+write lock, and a killed writer leaves a WAL to recover on next launch. Doing
+that routinely teaches the user that quitting risks their data.

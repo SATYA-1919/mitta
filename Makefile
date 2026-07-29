@@ -7,11 +7,14 @@ PY      ?= .venv/bin/python
 CORE    := core
 VENV    := .venv
 UI      := apps/desktop
+SHELL_DIR := apps/desktop/src-tauri
+CARGO   ?= $(HOME)/.cargo/bin/cargo
 
 .DEFAULT_GOAL := help
 .PHONY: help venv install install-ui test test-unit test-integration lint typecheck arch \
         check check-ui check-all run clean \
-        dev dev-real ui-dev ui-build ui-test ui-typecheck ui-budget gen-types download-model
+        dev dev-real ui-dev ui-build ui-test ui-typecheck ui-budget gen-types download-model \
+        shell-build shell-test shell-lint shell-run check-shell
 
 help:  ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -83,7 +86,24 @@ gen-types:  ## Regenerate frontend types from the Pydantic schemas (DEC-028)
 
 check-ui: ui-typecheck ui-test ui-budget  ## Frontend: everything CI runs
 
-check-all: check check-ui  ## Both runtimes
+# ── Shell (Rust/Tauri) ─────────────────────────────────────────────────────
+
+shell-build:  ## Build the Tauri shell
+	cd $(SHELL_DIR) && $(CARGO) build
+
+shell-test:  ## Rust unit tests
+	cd $(SHELL_DIR) && $(CARGO) test
+
+shell-lint:  ## rustfmt --check and clippy, warnings denied
+	cd $(SHELL_DIR) && $(CARGO) fmt --check
+	cd $(SHELL_DIR) && $(CARGO) clippy --all-targets -- -D warnings
+
+shell-run: ui-build  ## Run the desktop app (builds the frontend first)
+	cd $(SHELL_DIR) && $(CARGO) run
+
+check-shell: shell-lint shell-test  ## Shell: everything CI runs
+
+check-all: check check-ui check-shell  ## All three runtimes
 
 run:  ## Run the sidecar in dev mode against a scratch storage root
 	cd $(CORE) && MITTA_STORAGE_ROOT=$${MITTA_STORAGE_ROOT:-/tmp/mitta-dev} \

@@ -13,6 +13,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from mitta.api.auth import TokenVerifier
 from mitta.api.exception_handlers import register_exception_handlers
@@ -92,8 +93,38 @@ def create_app(
             extra={"reason": "no MITTA_SESSION_TOKEN in environment"},
         )
 
-    # No CORS middleware. The only legitimate client is the Tauri webview, which
-    # is same-origin through the shell; adding CORS would be adding a way in.
+    # CORS, restricted to an explicit allowlist.
+    #
+    # An earlier version of this file asserted that no CORS was needed because
+    # the Tauri webview is "same-origin through the shell". That is false, and
+    # running the shell proved it: Tauri serves the frontend from
+    # `tauri://localhost` (and `http://127.0.0.1:1420` under `devUrl`), while the
+    # sidecar listens on `http://127.0.0.1:<ephemeral>`. Every request is
+    # cross-origin, the preflight was answered with 405, and no response carried
+    # `Access-Control-Allow-Origin` — so the browser blocked everything. Nothing
+    # worked at all (DEC-058).
+    #
+    # This is an allowlist of exactly the origins the shell can serve from, not
+    # a wildcard. It grants nothing that the loopback bind, the 256-bit session
+    # token and the WebSocket origin check did not already gate; it only stops
+    # the browser from blocking the one client that is supposed to work.
+    allowed_origins = list(settings.allowed_origins)
+    if settings.dev_mode:
+        # `devUrl` in tauri.conf.json. Dev-only: a release build never loads the
+        # frontend over http, so this origin must not be permitted there.
+        allowed_origins += ["http://127.0.0.1:1420", "http://localhost:1420"]
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=allowed_origins,
+        # Credentials travel in the Authorization header, never in cookies, so
+        # `allow_credentials` stays off. Turning it on is what makes a wildcard
+        # origin dangerous, and it buys nothing here.
+        allow_credentials=False,
+        allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type"],
+        max_age=600,
+    )
     app.add_middleware(RequestContextMiddleware)
     register_exception_handlers(app)
     app.include_router(system_router)

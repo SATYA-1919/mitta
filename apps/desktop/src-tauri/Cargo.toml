@@ -1,0 +1,45 @@
+[package]
+name = "mitta"
+version = "0.1.0"
+description = "MITTA — AI desktop operating companion"
+authors = ["Satya"]
+edition = "2021"
+rust-version = "1.82"
+
+[lib]
+# Named distinctly from the binary so `cargo test` can exercise the library
+# without linking the whole Tauri runtime. The supervisor's restart policy and
+# the token generator are ordinary Rust and deserve ordinary unit tests.
+name = "mitta_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["macos-private-api", "tray-icon"] }
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-opener = "2"
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Keychain access. The default `v1` feature pulls in
+# `apple-native-keyring-store/keychain`, which calls the Security framework
+# directly — as opposed to shelling out to `/usr/bin/security`, which would put
+# the key on a command line where `ps` can read it (R3, DEC-017).
+keyring = "4"
+
+sysinfo = "0.39"
+rand = "0.9"
+thiserror = "2"
+log = "0.4"
+
+[profile.release]
+# A desktop app ships once and runs for hours; compile time is the cheap side of
+# this trade.
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"

@@ -160,3 +160,81 @@ def test_openapi_export_fails_loudly_on_a_missing_router() -> None:
 
     with pytest.raises(RuntimeError, match="missing"):
         schema_export._assert_complete({"paths": {"/health": {}}})
+
+
+# -- CORS (DEC-058) ---------------------------------------------------------- #
+
+
+def test_the_tauri_origin_is_permitted(client: TestClient, auth_headers: dict[str, str]) -> None:
+    """Without this the shell cannot reach the sidecar at all.
+
+    Tauri serves the frontend from `tauri://localhost`; the sidecar listens on
+    `http://127.0.0.1:<ephemeral>`. Every request is cross-origin, and a
+    response with no `Access-Control-Allow-Origin` is one the browser refuses to
+    hand to JavaScript.
+    """
+    response = client.get("/v1/status", headers={**auth_headers, "Origin": "tauri://localhost"})
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "tauri://localhost"
+
+
+def test_preflight_is_answered(client: TestClient) -> None:
+    response = client.options(
+        "/v1/memory",
+        headers={
+            "Origin": "tauri://localhost",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "authorization",
+        },
+    )
+
+    assert response.status_code == 200
+    assert "authorization" in response.headers["access-control-allow-headers"].lower()
+
+
+def test_an_unlisted_origin_gets_no_cors_header(
+    client: TestClient, auth_headers: dict[str, str]
+) -> None:
+    """An allowlist, not a wildcard.
+
+    A page the user happens to visit must not be able to read this API's
+    responses, even though it can reach the port.
+    """
+    response = client.get("/v1/status", headers={**auth_headers, "Origin": "https://evil.example"})
+
+    assert "access-control-allow-origin" not in response.headers
+
+
+def test_credentials_are_not_permitted_cross_origin(
+    client: TestClient, auth_headers: dict[str, str]
+) -> None:
+    # The session token travels in the Authorization header, never a cookie.
+    # `allow_credentials` would only add ambient-authority risk for no gain.
+    response = client.get("/v1/status", headers={**auth_headers, "Origin": "tauri://localhost"})
+    assert "access-control-allow-credentials" not in response.headers
+
+
+def test_the_vite_dev_origin_is_not_allowed_outside_dev_mode(
+    paths,
+    db_settings,
+    migrated,  # type: ignore[no-untyped-def]
+) -> None:
+    """A release build never loads the frontend over http."""
+    from mitta.api.app import create_app
+    from mitta.config.settings import Settings
+    from mitta.os_adapter.mac import MacAdapter
+
+    settings = Settings(
+        storage_root=paths.storage_root,
+        runtime_dir=paths.runtime_dir,
+        log_dir=paths.log_dir,
+        session_token="x" * 32,
+        dev_mode=False,
+        database=db_settings,
+    )
+    app = create_app(settings=settings, paths=paths, database=migrated, os_adapter=MacAdapter())
+
+    with TestClient(app) as production:
+        response = production.get("/health", headers={"Origin": "http://127.0.0.1:1420"})
+    assert "access-control-allow-origin" not in response.headers
