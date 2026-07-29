@@ -382,6 +382,156 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/projects": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List projects */
+        get: operations["list_projects_v1_projects_get"];
+        put?: never;
+        /** Create a project */
+        post: operations["create_v1_projects_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/projects/resolve-path": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Inspect the boundary
+         * @description What the policy engine would conclude about this path, and why.
+         *
+         *     Read-only and side-effect-free. It reports on the boundary; it does not touch
+         *     the filesystem beyond the `stat` calls that resolving symlinks requires, and
+         *     it never reveals whether the path exists.
+         */
+        get: operations["resolve_path_v1_projects_resolve_path_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/projects/{project_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read one */
+        get: operations["get_v1_projects__project_id__get"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete permanently
+         * @description Irreversible. Cascades to paths and to project-scoped memories.
+         *
+         *     Conversations survive and become unscoped — the schema's own
+         *     `ON DELETE SET NULL`. A project memory without its project is meaningless; a
+         *     thread without one is just a thread.
+         */
+        delete: operations["delete_v1_projects__project_id__delete"];
+        options?: never;
+        head?: never;
+        /** Update or archive */
+        patch: operations["update_v1_projects__project_id__patch"];
+        trace?: never;
+    };
+    "/v1/projects/{project_id}/memory": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Scoped memory
+         * @description Project-scoped memory.
+         *
+         *     Overlaps `GET /v1/memory?project_id=…` deliberately, and differs in one way
+         *     that matters: an unknown id 404s here instead of returning an empty list. A
+         *     typo'd filter that answers "no memories" is indistinguishable from a project
+         *     that genuinely has none.
+         */
+        get: operations["project_memory_v1_projects__project_id__memory_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/projects/{project_id}/paths": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Registered paths */
+        get: operations["paths_v1_projects__project_id__paths_get"];
+        put?: never;
+        /**
+         * Register a path
+         * @description Edits the write boundary, so it is audited.
+         *
+         *     The path is canonicalised in the repository, and the audit entry records the
+         *     canonical form rather than what was submitted — `~/work/../.ssh` and
+         *     `/Users/satya/.ssh` are the same grant, and a log that records the first
+         *     hides what was actually permitted.
+         */
+        post: operations["add_path_v1_projects__project_id__paths_post"];
+        /**
+         * Deregister a path
+         * @description The path travels as a query parameter rather than in the URL.
+         *
+         *     An absolute filesystem path in a path segment has to be encoded, and a
+         *     double-encoded slash is a class of bug that ends with the wrong permission
+         *     being revoked. `DELETE` with a body is worse — not every client sends one.
+         */
+        delete: operations["remove_path_v1_projects__project_id__paths_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/projects/{project_id}/timeline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Episodic timeline
+         * @description Empty until something writes an episode.
+         *
+         *     Nothing in this phase does. The endpoint exists so the shape is fixed and the
+         *     surface is not built against a guess.
+         */
+        get: operations["timeline_v1_projects__project_id__timeline_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/providers": {
         parameters: {
             query?: never;
@@ -423,6 +573,22 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AddPathRequest */
+        AddPathRequest: {
+            /** @default root */
+            kind: components["schemas"]["PathKind"];
+            /**
+             * Path
+             * @description Absolute or ~-relative. Canonicalised on save.
+             */
+            path: string;
+            /**
+             * Writable
+             * @description Granting write is deliberate and separate from adding the path.
+             * @default false
+             */
+            writable: boolean;
+        };
         /** AuditEntryResource */
         AuditEntryResource: {
             /** Action */
@@ -484,6 +650,12 @@ export interface components {
              */
             state: "ok" | "degraded" | "unavailable";
         };
+        /**
+         * Containment
+         * @description Where a path sits relative to everything the user has registered.
+         * @enum {string}
+         */
+        Containment: "writable" | "read_only" | "excluded" | "outside";
         /** ConversationListResponse */
         ConversationListResponse: {
             /** Conversations */
@@ -554,6 +726,19 @@ export interface components {
             project_id?: string | null;
             /** Summary */
             summary?: string | null;
+        };
+        /** CreateProjectRequest */
+        CreateProjectRequest: {
+            /** Color */
+            color?: string | null;
+            /** Description */
+            description?: string | null;
+            /** Name */
+            name: string;
+            /** Settings */
+            settings?: {
+                [key: string]: unknown;
+            };
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -704,6 +889,71 @@ export interface components {
          * @enum {string}
          */
         MessageRole: "user" | "assistant" | "system" | "tool";
+        /**
+         * PathKind
+         * @description What a registered path *is*, which determines how policy treats it.
+         *
+         *     `EXCLUDED` is not "a path we do not care about" — it is a hole punched
+         *     inside a root that has already been granted. A project rooted at
+         *     `~/work/mitta` with `~/work/mitta/.env` excluded is the case this exists
+         *     for, and it only works if exclusion beats containment. See
+         *     `boundary.classify`.
+         * @enum {string}
+         */
+        PathKind: "root" | "repo" | "docs" | "excluded";
+        /** PathListResponse */
+        PathListResponse: {
+            /** Paths */
+            paths: components["schemas"]["PathResource"][];
+            /** Project Id */
+            project_id: string;
+        };
+        /** PathResource */
+        PathResource: {
+            /** Created At */
+            created_at: number;
+            kind: components["schemas"]["PathKind"];
+            /** Path */
+            path: string;
+            /** Project Id */
+            project_id: string;
+            /** Writable */
+            writable: boolean;
+        };
+        /** ProjectListResponse */
+        ProjectListResponse: {
+            /** Projects */
+            projects: components["schemas"]["ProjectSummary"][];
+            /** Total */
+            total: number;
+        };
+        /**
+         * ProjectStatus
+         * @enum {string}
+         */
+        ProjectStatus: "active" | "archived";
+        /** ProjectSummary */
+        ProjectSummary: {
+            /** Color */
+            color: string | null;
+            /** Created At */
+            created_at: number;
+            /** Description */
+            description: string | null;
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Path Count */
+            path_count: number;
+            /** Settings */
+            settings: {
+                [key: string]: unknown;
+            };
+            status: components["schemas"]["ProjectStatus"];
+            /** Updated At */
+            updated_at: number;
+        };
         /** ProviderStatusResource */
         ProviderStatusResource: {
             /** Configured */
@@ -738,6 +988,25 @@ export interface components {
          * @enum {string}
          */
         Register: "playful" | "serious";
+        /**
+         * ResolutionResource
+         * @description What the policy engine would conclude about one path, exposed for inspection.
+         */
+        ResolutionResource: {
+            containment: components["schemas"]["Containment"];
+            /** Explanation */
+            explanation: string;
+            /** Matched Path */
+            matched_path: string | null;
+            /** Needs Confirmation */
+            needs_confirmation: boolean;
+            /** Path */
+            path: string;
+            /** Project Id */
+            project_id: string | null;
+            /** Refused */
+            refused: boolean;
+        };
         /** SearchHitResource */
         SearchHitResource: {
             /** Keyword Rank */
@@ -820,6 +1089,30 @@ export interface components {
             /** Expired */
             expired: number;
         };
+        /** TimelineEventResource */
+        TimelineEventResource: {
+            /** Detail */
+            detail: string | null;
+            /** Event Type */
+            event_type: string;
+            /** Id */
+            id: string;
+            /** Occurred At */
+            occurred_at: number;
+            /** Payload */
+            payload: {
+                [key: string]: unknown;
+            };
+            /** Title */
+            title: string;
+        };
+        /** TimelineResponse */
+        TimelineResponse: {
+            /** Events */
+            events: components["schemas"]["TimelineEventResource"][];
+            /** Project Id */
+            project_id: string;
+        };
         /** TurnResource */
         TurnResource: {
             /** Conversation Id */
@@ -874,6 +1167,29 @@ export interface components {
             pinned?: boolean | null;
             /** Summary */
             summary?: string | null;
+        };
+        /**
+         * UpdateProjectRequest
+         * @description Every field optional; `None` means "leave it alone".
+         *
+         *     `status` is here rather than on a separate archive endpoint because, unlike a
+         *     conversation, archiving a project changes what MITTA may do — an archived
+         *     project's paths stop granting access (`ProjectRepository.paths_containing`).
+         *     Keeping it in the patch body means one place to look for "what changed about
+         *     this project".
+         */
+        UpdateProjectRequest: {
+            /** Color */
+            color?: string | null;
+            /** Description */
+            description?: string | null;
+            /** Name */
+            name?: string | null;
+            /** Settings */
+            settings?: {
+                [key: string]: unknown;
+            } | null;
+            status?: components["schemas"]["ProjectStatus"] | null;
         };
         /** ValidationError */
         ValidationError: {
@@ -1599,6 +1915,364 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MemoryResource"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_projects_v1_projects_get: {
+        parameters: {
+            query?: {
+                status?: "active" | "archived" | "all";
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_v1_projects_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateProjectRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectSummary"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    resolve_path_v1_projects_resolve_path_get: {
+        parameters: {
+            query: {
+                /** @description Absolute or ~-relative. */
+                path: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResolutionResource"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_v1_projects__project_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectSummary"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_v1_projects__project_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_v1_projects__project_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateProjectRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectSummary"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    project_memory_v1_projects__project_id__memory_get: {
+        parameters: {
+            query?: {
+                kind?: components["schemas"]["MemoryKind"] | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    paths_v1_projects__project_id__paths_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PathListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    add_path_v1_projects__project_id__paths_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AddPathRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PathResource"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    remove_path_v1_projects__project_id__paths_delete: {
+        parameters: {
+            query: {
+                path: string;
+            };
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    timeline_v1_projects__project_id__timeline_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TimelineResponse"];
                 };
             };
             /** @description Validation Error */

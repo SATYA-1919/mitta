@@ -47,6 +47,18 @@ class ToolSpec:
     #: "Write 412 characters to 'ideas.md'?" should, because a prompt nobody
     #: reads is a prompt that approves everything.
     describer: Callable[[dict[str, Any]], str] | None = None
+    #: Parameter names whose values are filesystem paths. The policy engine
+    #: resolves each one against the project boundary before the tool runs
+    #: (`mitta.projects.boundary`).
+    #:
+    #: Declared, not sniffed. The engine cannot guess which arguments are paths,
+    #: and a heuristic on the parameter *name* would fail in the direction that
+    #: costs a file: a tool with a path in `destination` would silently skip the
+    #: boundary check and look exactly like a tool that has no path at all. An
+    #: empty tuple means "no filesystem reach", which the engine can verify; a
+    #: missing declaration on a tool that does touch the disk is a bug this
+    #: field makes reviewable in one line of the spec.
+    path_params: tuple[str, ...] = ()
 
     def describe(self, params: dict[str, Any]) -> str:
         """The confirmation prompt.

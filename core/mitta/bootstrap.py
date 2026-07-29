@@ -13,8 +13,10 @@ construction rather than by convention, and both live here:
 * Nothing above the OS Adapter ever learns a platform-specific path, because
   paths are resolved once, here, from the adapter.
 
-Landed so far: config, telemetry, OS adapter, persistence, API (Phase 3) and the
-memory engine (Phase 5).
+Landed so far: config, telemetry, OS adapter, persistence, API (Phase 3), the
+memory engine (Phase 5), the LLM gateway and agent (Phase 7), the permission
+model (Phase 8), the planner (Phase 9), personality (Phase 12) and projects
+(Phase 10).
 """
 
 from __future__ import annotations
@@ -52,6 +54,8 @@ from mitta.policy.audit import AuditLog
 from mitta.policy.broker import ApprovalBroker
 from mitta.policy.engine import PolicyEngine
 from mitta.policy.executor import ToolExecutor
+from mitta.projects.boundary import PathBoundary
+from mitta.projects.repository import ProjectRepository
 from mitta.telemetry.logging import get_logger, setup_logging
 from mitta.telemetry.redaction import SecretRedactor
 from mitta.tools.builtin.open_app import OpenAppTool
@@ -77,6 +81,7 @@ class Runtime:
     gateway: LLMGateway
     audit: AuditLog
     conversations: ConversationRepository
+    projects: ProjectRepository
     orchestrator: Orchestrator
     app: FastAPI
 
@@ -175,7 +180,14 @@ def build_runtime(
     )
     audit = AuditLog(database)
     approvals = ApprovalAuthority(database)
-    policy = PolicyEngine(audit, approvals)
+    projects = ProjectRepository(database)
+    # The engine receives the boundary, not the repository. It needs to resolve a
+    # path; it has no business creating a project or granting one write access,
+    # and the narrowest reference that does the job is the one that cannot be
+    # misused later — the same reasoning that keeps the OS Adapter out of the
+    # Tool Manager.
+    boundary = PathBoundary(projects)
+    policy = PolicyEngine(audit, approvals, boundary=boundary)
 
     # The registry is filled here and nowhere else. A capability that can act on
     # the user's machine should appear in the composition root, where it can be
@@ -212,6 +224,8 @@ def build_runtime(
         embedder=embedder,
         gateway=gateway,
         conversations=conversations,
+        projects=projects,
+        path_boundary=boundary,
         orchestrator=orchestrator,
         approval_broker=broker,
         policy=policy,
@@ -230,6 +244,7 @@ def build_runtime(
         gateway=gateway,
         audit=audit,
         conversations=conversations,
+        projects=projects,
         orchestrator=orchestrator,
         app=app,
     )

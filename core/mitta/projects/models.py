@@ -1,18 +1,14 @@
-"""Project, path and resource models.
+"""Project and path models.
 
 A project is a **scope**. It answers "which of these memories, conversations and
 filesystem locations belong together", and every one of those three already
 carries a `project_id` column waiting for something to set it.
 
-The important distinction in this module is between the two kinds of thing a
-project holds:
-
-* A **resource** is a bookmark — a repo URL, a design doc, a decision. It is
-  organisational, and getting it wrong costs tidiness.
-* A **path** is a security boundary. `project_paths` is consulted by the policy
-  engine before a filesystem action, and getting it wrong costs the user a file.
-  That is why `ProjectPath` is constructed through `boundary.canonicalise` and
-  never from a raw string, and why `writable` defaults to false.
+A project's name and colour are organisational, and getting them wrong costs
+tidiness. Its **paths** are not: `project_paths` is consulted by the policy
+engine before a filesystem action, and getting one wrong costs the user a file.
+That is why `ProjectPath` is only ever built through `boundary.canonicalise` and
+never from a raw string, and why `writable` defaults to false.
 
 Records are frozen dataclasses; drafts are Pydantic models. The split follows
 `mitta.conversations.models`: dataclasses are built from trusted database rows,
@@ -49,15 +45,6 @@ class PathKind(StrEnum):
     EXCLUDED = "excluded"
 
 
-class ResourceKind(StrEnum):
-    REPO = "repo"
-    URL = "url"
-    FILE = "file"
-    NOTE = "note"
-    TASK = "task"
-    DECISION = "decision"
-
-
 @dataclass(frozen=True, slots=True)
 class Project:
     seq: int
@@ -87,20 +74,6 @@ class ProjectPath:
     @property
     def is_excluded(self) -> bool:
         return self.kind is PathKind.EXCLUDED
-
-
-@dataclass(frozen=True, slots=True)
-class ProjectResource:
-    seq: int
-    id: str
-    project_id: str
-    kind: ResourceKind
-    title: str
-    uri: str | None
-    body: str | None
-    metadata: dict[str, Any]
-    created_at: int
-    updated_at: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -145,13 +118,3 @@ class ProjectPathDraft(BaseModel):
     path: str = Field(min_length=1)
     kind: PathKind = PathKind.ROOT
     writable: bool = False
-
-
-class ProjectResourceDraft(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    kind: ResourceKind
-    title: str = Field(min_length=1, max_length=200)
-    uri: str | None = Field(default=None, max_length=2000)
-    body: str | None = Field(default=None, max_length=64_000)
-    metadata: dict[str, Any] = Field(default_factory=dict)

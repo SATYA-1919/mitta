@@ -14,6 +14,7 @@ pub mod secrets;
 pub mod sidecar;
 pub mod state;
 pub mod token;
+pub mod voice;
 pub mod windows;
 
 use std::sync::Arc;
@@ -67,6 +68,13 @@ pub fn run() {
             let app_state = Arc::new(AppState::new(config));
             app.manage(Arc::clone(&app_state));
 
+            // The microphone stays closed until asked for. This only starts
+            // the loop that reports its state; DEC-105 makes opening it an
+            // explicit act by the user.
+            let voice_state = Arc::new(voice::VoiceState::new());
+            app.manage(Arc::clone(&voice_state));
+            voice::spawn_poll_loop(app.handle().clone(), voice_state);
+
             spawn_supervisor(app.handle().clone(), Arc::clone(&app_state));
             spawn_metrics(app.handle().clone());
             register_hotkey(app.handle());
@@ -105,6 +113,14 @@ pub fn run() {
             commands::show_main,
             commands::window_hide,
             commands::get_permissions_status,
+            commands::voice_request_permission,
+            commands::voice_start,
+            commands::voice_stop,
+            commands::voice_speak,
+            commands::voice_stop_speaking,
+            commands::voice_info,
+            commands::voice_set_voice,
+            commands::voice_open_settings,
         ])
         .build(tauri::generate_context!())
         .expect("failed to build MITTA")

@@ -31,6 +31,8 @@ from mitta.os_adapter.mac import MacAdapter
 from mitta.persistence.database import Database
 from mitta.persistence.migrations import migrate
 from mitta.policy.audit import AuditLog
+from mitta.projects.boundary import PathBoundary
+from mitta.projects.repository import ProjectRepository
 
 TEST_TOKEN = "test-session-token-0123456789abcdef"
 
@@ -98,6 +100,8 @@ def client(
     embedder: DeterministicEmbedder,
     gateway: LLMGateway,
     conversations: ConversationRepository,
+    projects: ProjectRepository,
+    path_boundary: PathBoundary,
     orchestrator: Orchestrator,
     migrated_audit: AuditLog,
 ) -> Iterator[TestClient]:
@@ -115,6 +119,8 @@ def client(
         embedder=embedder,
         gateway=gateway,
         conversations=conversations,
+        projects=projects,
+        path_boundary=path_boundary,
         orchestrator=orchestrator,
         audit=migrated_audit,
     )
@@ -210,3 +216,16 @@ def orchestrator(
 @pytest.fixture
 def migrated_audit(migrated: Database) -> AuditLog:
     return AuditLog(migrated)
+
+
+# ── Projects ───────────────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def projects(migrated: Database) -> ProjectRepository:
+    return ProjectRepository(migrated)
+
+
+@pytest.fixture
+def path_boundary(projects: ProjectRepository) -> PathBoundary:
+    return PathBoundary(projects)

@@ -2945,3 +2945,72 @@ battery is measurably worse. None of that applies to push-to-talk.
 on-device (`requiresOnDeviceRecognition`), which is what makes the wake word
 compatible with local-first at all — a cloud recogniser would put a permanently
 open microphone on someone else's server.
+
+
+---
+
+## DEC-106 — The speech layer is Swift, and Rust polls it
+
+R7 names `Speech` and `AVSpeechSynthesizer`, both Swift/ObjC-only, so the layer
+is native (DEC-019). Two choices inside that.
+
+**Swift rather than `objc2` message-sends.** This code registers a recognition
+task, taps an audio engine, and handles callbacks on three queues. Written as
+raw Objective-C runtime calls from Rust it is a page of `unsafe` per delegate
+and no safer for it. `build.rs` compiles `MittaVoice.swift` into a static
+library, so the source in the tree is demonstrably the binary that ships.
+
+**Polled, not callback-driven.** Every Apple callback writes to state behind one
+lock in Swift, and Rust samples it at 20 Hz from a thread it chose. Handing
+Swift three sets of Rust function pointers means getting `Send`/`Sync` right
+across an FFI boundary for callbacks that can fire during teardown. Transcripts
+change a few times a second, so nothing perceptible is lost.
+
+**The waveform is the real microphone level**, RMS from the audio tap, forced to
+zero the moment the microphone closes — in Rust and again in the webview. A
+level meter animating on a timer looks better and tells the user they are being
+recorded when they are not, which is the one lie a microphone indicator must
+never tell.
+
+**`Info.plist` is embedded in the binary**, not only in the bundle. TCC kills a
+process that asks for the microphone without a usage string, and `cargo run`
+produces a bare executable with no bundle to read one from — so voice would have
+worked in a release build and crashed in development.
+
+**On-device or not at all.** `requiresOnDeviceRecognition` is set *and*
+`supportsOnDeviceRecognition` is checked; a Mac that cannot transcribe locally
+is refused with a reason rather than quietly having its microphone streamed to
+Apple. That check is what makes an always-open microphone compatible with R5.
+
+
+---
+
+## DEC-107 — Which voice, and the part Apple does not tell you
+
+The first thing built spoke in the system default voice, and the product owner's
+response was immediate: it should have some feeling, and it should be male and
+JARVIS-shaped.
+
+**Voice selection is scored, accent first.** An en-GB male at compact quality
+reads closer to what was asked for than a pristine American one, so language
+outranks quality; within an accent, premium beats enhanced beats compact, and
+`Oliver`, `Daniel`, `Arthur`, `Jamie` are preferred by name. `Fred` is excluded
+explicitly — it is the 1980s formant synthesiser, it is male and English, and it
+would win a naive "any male voice" search.
+
+**There is no emotion API.** `AVSpeechUtterance` exposes rate, pitch and volume;
+nothing exposes "sound pleased". The delivery is tuned as far as those three go
+— slightly under default rate and pitch, which is what makes a short
+confirmation sound deliberate rather than hurried — and that is the honest
+ceiling.
+
+**The real lever is a download the user cannot know about.** This Mac has three
+male English voices, all compact: Fred, Rishi, and Daniel at *super-compact*
+quality. The good voices ship as an opt-in download buried in Accessibility →
+Spoken Content → Manage Voices, and macOS surfaces this nowhere. An assistant
+that sounds like a train announcement therefore reads as a bug in MITTA.
+
+So `voice_info` reports the chosen voice and its quality, the UI says "better
+voice" when only compact ones exist, and the button opens the pane where the
+download happens. Not a fix — there is no API to install a voice — but the
+difference between a defect and a one-time setting the user can act on.

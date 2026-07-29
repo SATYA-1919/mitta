@@ -13,13 +13,16 @@ import {
   getRuntimeInfo,
   isTauriAvailable,
   onMetrics,
+  onVoiceUpdate,
   type RuntimeInfo,
   ShellUnavailableError,
 } from '@/lib/ipc/tauri';
 import { TransportClient } from '@/lib/transport/socket';
 import { useMemoryStore } from '@/state/memory';
+import { useProjectsStore } from '@/state/projects';
 import { bindTransport } from '@/state/sync';
 import { useStore } from '@/state/store';
+import { useVoiceStore } from '@/state/voice';
 
 export interface Connection {
   api: ApiClient;
@@ -163,9 +166,22 @@ async function establish(): Promise<Connection | null> {
     useStore.getState().setMetrics(metrics);
   });
 
+  // Voice (R7). A finished utterance becomes a turn through exactly the same
+  // path as typing — `setDraft` then `send` — so a spoken request and a typed
+  // one cannot diverge in behaviour.
+  const unlistenVoice = await onVoiceUpdate((update) => {
+    useVoiceStore.getState().apply(update);
+  });
+  useVoiceStore.getState().bind((text) => {
+    const store = useStore.getState();
+    store.setDraft(text);
+    store.send();
+  });
+
   // Server-owned state gets its own store fed by the same client, rather than
   // a second client with its own token handling (DEC-018).
   useMemoryStore.getState().attach(api);
+  useProjectsStore.getState().attach(api);
   useStore.getState().attachChat(api, transport);
 
   const connection: Connection = {
@@ -174,11 +190,14 @@ async function establish(): Promise<Connection | null> {
     dispose: () => {
       unbind();
       unlistenMetrics();
+      unlistenVoice();
+      useVoiceStore.getState().bind(null);
       transport.close();
       // Only detach what is still attached. Clearing unconditionally is how a
       // disposed connection used to erase a live one's transport.
       if (useStore.getState().transport === transport) {
         useMemoryStore.getState().attach(null);
+        useProjectsStore.getState().attach(null);
         useStore.getState().attachChat(null, null);
       }
       if (established !== null) {

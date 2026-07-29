@@ -77,18 +77,38 @@ class Resolution:
         return self.containment is Containment.WRITABLE
 
     @property
+    def refused(self) -> bool:
+        """A standing refusal. No confirmation can lift it — see DEC-111."""
+        return self.containment is Containment.EXCLUDED
+
+    @property
     def needs_confirmation(self) -> bool:
-        """Anything the user has not affirmatively granted for writing."""
-        return self.containment is not Containment.WRITABLE
+        """Whether a write here would have to be asked about.
+
+        Excluded is **not** included, and that exception is the point. An
+        exclusion is a refusal, not a question, so reporting it as "needs
+        confirmation" would have the UI offer the user a choice the engine will
+        not honour. The two are distinguished here, once, rather than in every
+        caller that renders a verdict.
+        """
+        return self.containment in (Containment.READ_ONLY, Containment.OUTSIDE)
 
     def describe(self) -> str:
         """A human sentence for the confirmation card."""
+        # A path contains itself, so the matched rule is often the target. Saying
+        # "X is inside X" is technically true and reads as a bug, which costs the
+        # sentence the credibility it needs to be read at all.
+        itself = self.matched_path == self.path
         match self.containment:
             case Containment.WRITABLE:
                 return f"{self.path} is inside a writable project path."
             case Containment.READ_ONLY:
+                if itself:
+                    return f"{self.path} is registered, but not writable."
                 return f"{self.path} is inside {self.matched_path}, which is not writable."
             case Containment.EXCLUDED:
+                if itself:
+                    return f"{self.path} is excluded."
                 return f"{self.path} is inside {self.matched_path}, which you excluded."
             case Containment.OUTSIDE:
                 return f"{self.path} is outside every project path you have configured."
@@ -106,13 +126,13 @@ def canonicalise(raw: str | Path) -> Path:
     return Path(raw).expanduser().resolve(strict=False)
 
 
-def _is_within(candidate: PurePosixPath, ancestor: PurePosixPath) -> bool:
+def _is_within(candidate: PurePath, ancestor: PurePath) -> bool:
     """Containment on path components, never on characters.
 
     `str.startswith` reports `/home/satya-backup` as inside `/home/satya`. This
     does not, because it compares `('home', 'satya-backup')` against
-    ('home', 'satya') element by element. A path is also within itself, which is
-    what makes registering a file rather than a directory work.
+    `('home', 'satya')` element by element. A path is also within itself, which
+    is what makes registering a file rather than a directory work.
     """
     return candidate == ancestor or ancestor in candidate.parents
 
@@ -127,13 +147,12 @@ def classify(target: str | Path, registered: Iterable[ProjectPath]) -> Resolutio
     to remember what they added first.
     """
     resolved = canonicalise(target)
-    as_pure = PurePosixPath(resolved)
 
     best: ProjectPath | None = None
     best_depth = -1
     for entry in registered:
-        ancestor = PurePosixPath(entry.path)
-        if not _is_within(as_pure, ancestor):
+        ancestor = PurePath(entry.path)
+        if not _is_within(resolved, ancestor):
             continue
         depth = len(ancestor.parts)
         # Strictly greater, so the first of two equally specific rules wins
@@ -161,14 +180,26 @@ def classify(target: str | Path, registered: Iterable[ProjectPath]) -> Resolutio
     )
 
 
+@runtime_checkable
+class PathLookup(Protocol):
+    """What the boundary needs from storage. Implemented by `ProjectRepository`.
+
+    One method, and it takes the target rather than returning everything: only
+    the ancestors of a path can contain it, so the query is bounded by path
+    depth instead of by how many projects exist.
+    """
+
+    def paths_containing(self, target: Path) -> Sequence[ProjectPath]: ...
+
+
 class PathBoundary:
     """The policy engine's view of the boundary.
 
-    A protocol-shaped seam with one method, held by `PolicyEngine` so the engine
-    never learns that project paths live in SQLite. The engine is constructed
-    with this rather than with a repository for the same reason the Tool Manager
-    is constructed without an OS Adapter: the narrowest reference that does the
-    job is the one that cannot be misused later.
+    A one-method seam, held by `PolicyEngine` so the engine never learns that
+    project paths live in SQLite. The engine is constructed with this rather
+    than with a repository for the same reason the Tool Manager is constructed
+    without an OS Adapter: the narrowest reference that does the job is the one
+    that cannot be misused later.
     """
 
     def __init__(self, lookup: PathLookup) -> None:
@@ -181,10 +212,3 @@ class PathBoundary:
         # `idx_project_paths_lookup` exists to serve, and it keeps the cost of a
         # filesystem tool call independent of how many projects exist.
         return classify(resolved, self._lookup.paths_containing(resolved))
-
-
-class PathLookup:
-    """What `PathBoundary` needs from storage. Implemented by `ProjectRepository`."""
-
-    def paths_containing(self, target: Path) -> Sequence[ProjectPath]:  # pragma: no cover
-        raise NotImplementedError

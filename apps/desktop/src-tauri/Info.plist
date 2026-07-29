@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  macOS usage descriptions, merged into the bundle by Tauri.
+
+  These are not optional politeness. TCC terminates a process that requests
+  microphone or speech access without a matching usage string, so their absence
+  is a crash on first use rather than a denied prompt.
+
+  The wording is the wording the user sees in the system dialog, and it should
+  say what MITTA actually does — including the part people care about, which is
+  that the audio does not leave the machine (R5, DEC-105).
+-->
+<plist version="1.0">
+  <dict>
+    <!--
+      Identity, so TCC has something stable to attach the grant to. Without it
+      an unbundled binary is anonymous to the permission system and the prompt
+      returns on every run.
+    -->
+    <key>CFBundleIdentifier</key>
+    <string>com.mitta.desktop</string>
+    <key>CFBundleName</key>
+    <string>MITTA</string>
+
+    <key>NSMicrophoneUsageDescription</key>
+    <string>MITTA listens only while you hold the mic button, or while you have turned on continuous listening. Audio is transcribed on this Mac and never sent anywhere.</string>
+
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>MITTA turns your speech into text on-device, so what you say stays on this Mac.</string>
+  </dict>
+</plist>

@@ -17,6 +17,7 @@ import { ChatSurface } from '@/components/chat/ChatSurface';
 import { HistorySurface } from '@/components/history/HistorySurface';
 import { MemorySurface } from '@/components/memory/MemorySurface';
 import { MonitorSurface } from '@/components/monitor/MonitorSurface';
+import { ProjectsSurface } from '@/components/projects/ProjectsSurface';
 import { SettingsSurface } from '@/components/settings/SettingsSurface';
 import { HudRule } from '@/components/ui/hud';
 import { cx, EmptyState, StatusDot } from '@/components/ui/primitives';
@@ -66,7 +67,8 @@ export function MainWindow() {
           {surface === 'history' && <HistorySurface />}
           {surface === 'monitor' && <MonitorSurface />}
           {surface === 'settings' && <SettingsSurface />}
-          {(surface === 'projects' || surface === 'tasks' || surface === 'plugins') && (
+          {surface === 'projects' && <ProjectsSurface />}
+          {(surface === 'tasks' || surface === 'plugins') && (
             <EmptyState title={`${surface} is not built yet`} hint="Lands in a later phase" />
           )}
         </main>

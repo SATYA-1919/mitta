@@ -181,3 +181,83 @@ export function onMetrics(handler: (metrics: SystemMetrics) => void): Promise<()
 export function onSidecarState(handler: (state: SidecarState) => void): Promise<() => void> {
   return listen<SidecarState>('sidecar:state', handler);
 }
+
+// -- voice (R7, DEC-105) ----------------------------------------------------
+
+export type ListenState = 'idle' | 'listening' | 'failed';
+
+export interface VoiceUpdate {
+  state: ListenState;
+  transcript: string;
+  isFinal: boolean;
+  /** 0..1, sampled from the real audio tap. Never synthesised — a waveform that
+   *  moves with the microphone closed is a lie about whether you are recorded. */
+  level: number;
+  speaking: boolean;
+  continuous: boolean;
+  error: string | null;
+  /** The wake word was heard in continuous mode. */
+  triggered: boolean;
+}
+
+/** Ask for microphone and speech access. The prompt is modal; poll
+ *  `getPermissionsStatus` for the answer rather than awaiting this. */
+export function requestVoicePermission(): Promise<void> {
+  return invoke<void>('voice_request_permission');
+}
+
+/** Open the microphone. `continuous` enables wake-word mode (DEC-105). */
+export function startListening(continuous = false): Promise<void> {
+  return invoke<void>('voice_start', { continuous });
+}
+
+export function stopListening(): Promise<void> {
+  return invoke<void>('voice_stop');
+}
+
+export function speak(text: string, rate = 0): Promise<void> {
+  return invoke<void>('voice_speak', { text, rate });
+}
+
+export function stopSpeaking(): Promise<void> {
+  return invoke<void>('voice_stop_speaking');
+}
+
+export function onVoiceUpdate(handler: (update: VoiceUpdate) => void): Promise<() => void> {
+  return listen<VoiceUpdate>('voice:update', handler);
+}
+
+/** Whether the shell can do speech at all. False in a browser (`make dev`),
+ *  where there is no Rust side and therefore no Speech framework. */
+export function isVoiceAvailable(): boolean {
+  return isTauriAvailable();
+}
+
+export interface VoiceChoice {
+  id: string;
+  name: string;
+  language: string;
+  quality: 'compact' | 'enhanced' | 'premium';
+}
+
+export interface VoiceInfo {
+  name: string;
+  quality: 'compact' | 'enhanced' | 'premium';
+  /** Only compact voices are installed. The good ones are a free download that
+   *  macOS does not mention anywhere the user would look. */
+  canImprove: boolean;
+  available: VoiceChoice[];
+}
+
+export function getVoiceInfo(): Promise<VoiceInfo> {
+  return invoke<VoiceInfo>('voice_info');
+}
+
+export function setVoice(identifier: string | null): Promise<void> {
+  return invoke<void>('voice_set_voice', { identifier });
+}
+
+/** Open the Settings pane where macOS keeps its downloadable voices. */
+export function openVoiceSettings(): Promise<void> {
+  return invoke<void>('voice_open_settings');
+}

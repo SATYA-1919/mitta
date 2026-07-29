@@ -11,6 +11,7 @@ import { useEffect, useRef } from 'react';
 
 import { ActivityRing, HudPanel, HudRule } from '@/components/ui/hud';
 import { Button, cx, Kbd, StatusDot } from '@/components/ui/primitives';
+import { VoiceBar } from '@/components/voice/VoiceBar';
 import type { Message } from '@/lib/api/client';
 import { useMemoryStore } from '@/state/memory';
 import { displayText, type PendingApproval, useStore } from '@/state/store';
@@ -49,6 +50,7 @@ export function ChatSurface() {
         <p className="shrink-0 px-6 pb-2 text-xs text-danger">{chatError}</p>
       )}
 
+      <VoiceBar />
       <Composer disabled={connection !== 'open'} draftLength={draft.length} />
     </div>
   );

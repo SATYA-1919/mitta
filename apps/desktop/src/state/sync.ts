@@ -10,6 +10,8 @@
 import type { Envelope } from '@/lib/transport/envelope';
 import type { TransportClient } from '@/lib/transport/socket';
 
+import { useVoiceStore } from './voice';
+
 import type { AppState, Register, ThinkingPhase } from './store';
 import { useStore } from './store';
 
@@ -117,11 +119,14 @@ export function bindTransport(
         // there is nothing to swap and the stream is already correct.
         const data = frame.data as MessageData;
         state.setTurnProvenance(data.provider ?? null, data.model_id ?? null);
-        if (data.styled) {
-          state.settleTurn(data.content, data.register);
-        } else {
-          state.settleTurn(state.activeTurn?.streamed ?? data.content, data.register);
-        }
+        const settled = data.styled ? data.content : (state.activeTurn?.streamed ?? data.content);
+        state.settleTurn(settled, data.register);
+
+        // Spoken here rather than on `turn.delta`, so MITTA reads the settled
+        // reply once instead of stuttering through a stream, and reads the
+        // styled text the user is actually looking at (R7, DEC-046).
+        const voice = useVoiceStore.getState();
+        if (voice.speakReplies) void voice.speak(settled);
         break;
       }
       case 'turn.error': {

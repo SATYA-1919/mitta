@@ -22,6 +22,7 @@ from mitta.api.http import (
     audit_router,
     conversations_router,
     memory_router,
+    projects_router,
     providers_router,
     system_router,
 )
@@ -39,6 +40,8 @@ from mitta.persistence.database import Database
 from mitta.policy.audit import AuditLog
 from mitta.policy.broker import ApprovalBroker
 from mitta.policy.engine import PolicyEngine
+from mitta.projects.boundary import PathBoundary
+from mitta.projects.repository import ProjectRepository
 from mitta.telemetry.logging import get_logger
 from mitta.tools.registry import ToolRegistry
 
@@ -58,6 +61,8 @@ def create_app(
     embedder: EmbeddingProvider | None = None,
     gateway: LLMGateway | None = None,
     conversations: ConversationRepository | None = None,
+    projects: ProjectRepository | None = None,
+    path_boundary: PathBoundary | None = None,
     orchestrator: Orchestrator | None = None,
     approval_broker: ApprovalBroker | None = None,
     policy: PolicyEngine | None = None,
@@ -106,6 +111,8 @@ def create_app(
     app.state.embedder = embedder
     app.state.gateway = gateway
     app.state.conversations = conversations
+    app.state.projects = projects
+    app.state.path_boundary = path_boundary
     app.state.orchestrator = orchestrator
     app.state.approval_broker = approval_broker
     app.state.policy = policy
@@ -169,6 +176,17 @@ def create_app(
         app.include_router(providers_router)
     if conversations is not None:
         app.include_router(conversations_router)
+    # Four collaborators, because this router uses all four: the repository, the
+    # boundary for `/resolve-path`, the audit log for the two routes that edit a
+    # permission, and the memory engine for `/{id}/memory`. Mounting it with any
+    # of them missing would turn a wiring mistake into a 500 at request time.
+    if (
+        projects is not None
+        and path_boundary is not None
+        and audit is not None
+        and memory is not None
+    ):
+        app.include_router(projects_router)
     # Always mounted: the socket authenticates and reports agent unavailability
     # itself, and a client that cannot connect at all has no way to be told why.
     if audit is not None:

@@ -29,6 +29,18 @@ export type Message = components['schemas']['MessageResource'];
 export type ConversationList = components['schemas']['ConversationListResponse'];
 export type MessageList = components['schemas']['MessageListResponse'];
 
+export type Project = components['schemas']['ProjectSummary'];
+export type ProjectList = components['schemas']['ProjectListResponse'];
+export type ProjectPath = components['schemas']['PathResource'];
+export type PathList = components['schemas']['PathListResponse'];
+export type PathKind = components['schemas']['PathKind'];
+export type PathResolution = components['schemas']['ResolutionResource'];
+export type Containment = components['schemas']['Containment'];
+export type CreateProjectRequest = components['schemas']['CreateProjectRequest'];
+export type UpdateProjectRequest = components['schemas']['UpdateProjectRequest'];
+export type AddPathRequest = components['schemas']['AddPathRequest'];
+export type Timeline = components['schemas']['TimelineResponse'];
+
 export interface ListMemoriesParams {
   kind?: MemoryKind;
   projectId?: string;
@@ -236,6 +248,61 @@ export class ApiClient {
     return this.request<void>(`/v1/conversations/${encodeURIComponent(id)}`, {
       method: 'DELETE',
     });
+  }
+
+  // -- projects -------------------------------------------------------------
+
+  listProjects(includeArchived = false): Promise<ProjectList> {
+    // `all`, not an omitted parameter: `status=archived` would return *only*
+    // archived, which is not the toggle the UI wants.
+    return this.get<ProjectList>(`/v1/projects?status=${includeArchived ? 'all' : 'active'}`);
+  }
+
+  createProject(body: CreateProjectRequest): Promise<Project> {
+    return this.post<Project>('/v1/projects', body);
+  }
+
+  updateProject(id: string, body: UpdateProjectRequest): Promise<Project> {
+    return this.request<Project>(`/v1/projects/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    });
+  }
+
+  async deleteProject(id: string): Promise<void> {
+    await this.request<null>(`/v1/projects/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  }
+
+  projectPaths(id: string): Promise<PathList> {
+    return this.get<PathList>(`/v1/projects/${encodeURIComponent(id)}/paths`);
+  }
+
+  addProjectPath(id: string, body: AddPathRequest): Promise<ProjectPath> {
+    return this.post<ProjectPath>(`/v1/projects/${encodeURIComponent(id)}/paths`, body);
+  }
+
+  async removeProjectPath(id: string, path: string): Promise<void> {
+    // The path travels as a query parameter, not a URL segment: an absolute
+    // filesystem path in a segment has to be encoded, and a double-encoded
+    // slash is how the wrong permission gets revoked.
+    await this.request<null>(
+      `/v1/projects/${encodeURIComponent(id)}/paths?path=${encodeURIComponent(path)}`,
+      { method: 'DELETE' },
+    );
+  }
+
+  /**
+   * What the policy engine would conclude about a path, before any tool asks.
+   *
+   * R5: a boundary the user can only observe through a confirmation card at the
+   * moment of action is not one they can audit.
+   */
+  resolvePath(path: string): Promise<PathResolution> {
+    return this.get<PathResolution>(`/v1/projects/resolve-path?path=${encodeURIComponent(path)}`);
+  }
+
+  projectMemories(id: string, limit = 50): Promise<MemoryList> {
+    return this.get<MemoryList>(`/v1/projects/${encodeURIComponent(id)}/memory?limit=${limit}`);
   }
 }
 

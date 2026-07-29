@@ -33,6 +33,8 @@ from mitta.memory.vectors.store import VectorStore, build_index
 from mitta.os_adapter.mac import MacAdapter
 from mitta.persistence.database import Database
 from mitta.policy.audit import AuditLog
+from mitta.projects.boundary import PathBoundary
+from mitta.projects.repository import ProjectRepository
 
 
 def build_openapi() -> dict[str, Any]:
@@ -56,6 +58,7 @@ def build_openapi() -> dict[str, Any]:
     embedder = DeterministicEmbedder()
     repository = MemoryRepository(database)
     store = VectorStore(database, build_index(paths.vectors / "schema.faiss", embedder), embedder)
+    projects = ProjectRepository(database)
     app = create_app(
         settings=settings,
         paths=paths,
@@ -69,6 +72,8 @@ def build_openapi() -> dict[str, Any]:
         embedder=embedder,
         gateway=LLMGateway([GroqProvider(None), OpenRouterProvider(None)]),
         conversations=ConversationRepository(database),
+        projects=projects,
+        path_boundary=PathBoundary(projects),
         audit=AuditLog(database),
     )
     document: dict[str, Any] = app.openapi()
@@ -85,6 +90,7 @@ REQUIRED_PATH_PREFIXES = (
     "/v1/memory",
     "/v1/providers",
     "/v1/conversations",
+    "/v1/projects",
 )
 
 

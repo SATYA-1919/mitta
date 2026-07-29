@@ -102,6 +102,22 @@ class ToolExecutor:
                 tool_name, params, ToolResult.failure(exc.message), verdict="deny", turn_id=turn_id
             )
 
+        if decision.refused:
+            # A refusal is not a question, so it must not become one. Routing it
+            # into the approval branch below would put a card in front of the
+            # user for something no answer can permit — and clicking Approve
+            # would return here to be refused again. The model gets a sentence
+            # it can relay instead.
+            return self._record(
+                tool_name,
+                params,
+                ToolResult.failure(
+                    decision.prompt or f"{tool_name} is not permitted here: {decision.reason}."
+                ),
+                verdict="deny",
+                turn_id=turn_id,
+            )
+
         if not decision.allowed:
             # Not a failure. The turn pauses for the user to answer.
             execution = self._record(
