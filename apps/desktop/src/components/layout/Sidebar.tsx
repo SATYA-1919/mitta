@@ -28,13 +28,17 @@ export function Sidebar() {
       aria-label="Primary"
       className={cx(
         'flex h-full shrink-0 flex-col border-r border-border-subtle bg-surface-sunken',
+        'grid-surface',
         'transition-[width] duration-[--duration-normal] ease-[--ease-out]',
         collapsed ? 'w-[52px]' : 'w-[--spacing-sidebar]',
       )}
     >
-      <div className="drag-region flex h-[--spacing-titlebar] items-center px-4">
+      <div className="drag-region flex h-[--spacing-titlebar] items-center gap-2 px-4">
         {!collapsed && (
-          <span className="font-mono text-xs tracking-[0.18em] text-fg-muted">MITTA</span>
+          <>
+            <span className="size-1.5 rounded-full bg-accent" />
+            <span className="readout text-xs tracking-[0.28em] text-fg-secondary">MITTA</span>
+          </>
         )}
       </div>
 
@@ -48,16 +52,23 @@ export function Sidebar() {
                 aria-current={active ? 'page' : undefined}
                 onClick={() => setSurface(item.id)}
                 className={cx(
-                  'group flex w-full items-center justify-between rounded-md px-2.5 py-1.5',
+                  'group relative flex w-full items-center justify-between py-1.5 pl-3 pr-2.5',
                   'text-sm transition-colors duration-[--duration-fast]',
+                  // A left rule marks the active row rather than a filled pill.
+                  // A rail of indicators reads as instrumentation; a stack of
+                  // rounded pills reads as a settings app.
+                  'before:absolute before:left-0 before:top-1/2 before:h-4 before:w-px',
+                  'before:-translate-y-1/2 before:transition-colors',
                   active
-                    ? 'bg-surface-active text-fg-primary'
-                    : 'text-fg-muted hover:bg-surface-hover hover:text-fg-secondary',
+                    ? 'bg-surface-active/60 text-fg-primary before:bg-accent'
+                    : 'text-fg-muted before:bg-transparent hover:bg-surface-hover/50 hover:text-fg-secondary',
                 )}
               >
-                <span className={cx('truncate', collapsed && 'sr-only')}>{item.label}</span>
+                <span className={cx('truncate tracking-wide', collapsed && 'sr-only')}>
+                  {item.label}
+                </span>
                 {!collapsed && (
-                  <span className="font-mono text-2xs text-fg-faint opacity-0 transition-opacity group-hover:opacity-100">
+                  <span className="readout text-2xs text-fg-faint opacity-0 transition-opacity group-hover:opacity-100">
                     {item.hint}
                   </span>
                 )}

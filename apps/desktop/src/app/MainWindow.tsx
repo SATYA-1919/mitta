@@ -42,8 +42,11 @@ export function MainWindow() {
     <div className="flex h-full w-full overflow-hidden bg-surface-base">
       <Sidebar />
       <main className="flex min-w-0 flex-1 flex-col">
-        <header className="drag-region flex h-[--spacing-titlebar] shrink-0 items-center border-b border-border-subtle px-4">
-          <h1 className="text-sm font-medium capitalize text-fg-secondary">{surface}</h1>
+        <header className="drag-region flex h-[--spacing-titlebar] shrink-0 items-center gap-3 border-b border-border-subtle px-4">
+          <h1 className="label !text-[0.7rem] !text-fg-secondary">{surface}</h1>
+          {/* A hairline running to the edge. Cheap, and it does more to make a
+              header read as an instrument panel than any amount of chrome. */}
+          <span className="h-px flex-1 bg-gradient-to-r from-border-default to-transparent" />
         </header>
 
         <div className="min-h-0 flex-1">

@@ -12,6 +12,7 @@
     "gen:types": "openapi-typescript ../../core/openapi.json -o src/types/generated/api.ts"
   },
   "dependencies": {
+    "@tauri-apps/api": "^2.11.1",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "zustand": "^5.0.14"

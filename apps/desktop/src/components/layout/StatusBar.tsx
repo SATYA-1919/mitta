@@ -59,14 +59,14 @@ export function StatusBar() {
 
       {metrics !== null && (
         <>
-          <span className="font-mono">CPU {metrics.cpuPercent.toFixed(0)}%</span>
-          <span className="font-mono">RAM {formatBytes(metrics.memoryUsedBytes)}</span>
-          <span className="font-mono text-fg-faint">
+          <span className="readout">CPU {metrics.cpuPercent.toFixed(0)}%</span>
+          <span className="readout">RAM {formatBytes(metrics.memoryUsedBytes)}</span>
+          <span className="readout text-fg-faint">
             {/* No unprivileged GPU API on Apple Silicon (ARCHITECTURE.md §13). */}
             GPU {metrics.gpuPercent === null ? 'n/a' : `${metrics.gpuPercent.toFixed(0)}%`}
           </span>
           {metrics.batteryPercent !== null && (
-            <span className="font-mono">
+            <span className="readout">
               BAT {metrics.batteryPercent.toFixed(0)}%{metrics.batteryCharging === true ? '⚡' : ''}
             </span>
           )}

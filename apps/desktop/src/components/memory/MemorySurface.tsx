@@ -64,7 +64,7 @@ export function MemorySurface() {
             placeholder="Search memory…"
             aria-label="Search memory"
             className={cx(
-              'flex-1 rounded-md border border-border-subtle bg-surface-input px-3 py-2',
+              'flex-1 rounded-xs border border-border-subtle bg-surface-input px-3 py-2',
               'text-sm text-fg-primary placeholder:text-fg-faint',
               'focus-visible:border-accent focus-visible:outline-none',
             )}
@@ -194,7 +194,7 @@ function CreateRow() {
         placeholder="Remember something…"
         aria-label="New memory"
         className={cx(
-          'flex-1 rounded-md border border-border-subtle bg-surface-input px-3 py-1.5',
+          'flex-1 rounded-xs border border-border-subtle bg-surface-input px-3 py-1.5',
           'text-sm text-fg-primary placeholder:text-fg-faint',
           'focus-visible:border-accent focus-visible:outline-none',
         )}
@@ -203,7 +203,7 @@ function CreateRow() {
         value={kind}
         onChange={(event) => setKind(event.target.value as MemoryKind)}
         aria-label="Memory kind"
-        className="rounded-md border border-border-subtle bg-surface-input px-2 py-1.5 text-xs text-fg-secondary"
+        className="rounded-xs border border-border-subtle bg-surface-input px-2 py-1.5 text-xs text-fg-secondary"
       >
         {KINDS.filter((k) => k.value !== 'all').map((k) => (
           <option key={k.value} value={k.value}>
@@ -298,7 +298,7 @@ function StatsBar() {
   return (
     <footer className="flex shrink-0 flex-wrap items-center gap-3 border-t border-border-subtle px-4 py-2 text-2xs text-fg-muted">
       <span>{stats.active} active</span>
-      <span className="font-mono">
+      <span className="readout">
         {stats.vectors_indexed} indexed
         {stats.pending_embeddings > 0 && ` · ${stats.pending_embeddings} pending`}
       </span>
@@ -313,7 +313,7 @@ function StatsBar() {
       ) : (
         <span className="flex items-center gap-1.5">
           <StatusDot tone="ok" />
-          <span className="font-mono">{stats.embedding_model_id}</span>
+          <span className="readout">{stats.embedding_model_id}</span>
         </span>
       )}
 

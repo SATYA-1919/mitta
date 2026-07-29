@@ -1,9 +1,16 @@
 /**
  * Design tokens — the only place a colour, duration or radius is defined.
  *
- * R2: dark, matte black / graphite, developer-oriented, premium. References are
- * Linear, Raycast, Warp, Cursor. Explicitly not: neon, glow, holograms, or
- * anything that reads as a movie prop.
+ * R2, as amended: dark, dense, instrumented. The product owner asked for a
+ * JARVIS-inspired technical look, which relaxes R2's original blanket ban on
+ * anything sci-fi. The line that stays is the useful one: this is a surface
+ * someone works in for hours, not a title sequence.
+ *
+ * What that means concretely — a cyan accent instead of blue, monospace for
+ * every number, corner brackets and rule lines instead of soft cards, uppercase
+ * tracked labels, and live readouts. What it still excludes: animated rings,
+ * pulsing glow behind text, scanlines over content. Those read as a prop, and
+ * they make dense text harder to read, which is the opposite of technical.
  *
  * Values are OKLCH rather than hex. Perceptual uniformity is what lets a ramp be
  * built by stepping lightness and have every step *look* evenly spaced — the
@@ -19,18 +26,18 @@
   /* ── Surfaces ──────────────────────────────────────────────────────────
      A five-step ramp, not a two-step one. Depth in a dark UI has to be carried
      by lightness because shadow is nearly invisible against near-black. */
-  --color-surface-sunken: oklch(0.125 0.004 285);
-  --color-surface-base: oklch(0.155 0.005 285);
-  --color-surface-raised: oklch(0.188 0.006 285);
-  --color-surface-overlay: oklch(0.215 0.007 285);
-  --color-surface-input: oklch(0.235 0.007 285);
-  --color-surface-hover: oklch(0.255 0.008 285);
-  --color-surface-active: oklch(0.285 0.009 285);
+  --color-surface-sunken: oklch(0.11 0.006 240);
+  --color-surface-base: oklch(0.138 0.007 240);
+  --color-surface-raised: oklch(0.172 0.008 240);
+  --color-surface-overlay: oklch(0.20 0.009 240);
+  --color-surface-input: oklch(0.215 0.009 240);
+  --color-surface-hover: oklch(0.24 0.010 240);
+  --color-surface-active: oklch(0.275 0.014 220);
 
   /* ── Borders ─────────────────────────────────────────────────────────── */
-  --color-border-subtle: oklch(0.265 0.008 285);
-  --color-border-default: oklch(0.315 0.009 285);
-  --color-border-strong: oklch(0.395 0.011 285);
+  --color-border-subtle: oklch(0.26 0.012 230);
+  --color-border-default: oklch(0.32 0.016 225);
+  --color-border-strong: oklch(0.42 0.030 215);
 
   /* ── Foreground ──────────────────────────────────────────────────────── */
   --color-fg-primary: oklch(0.965 0.002 285);
@@ -40,12 +47,21 @@
   --color-fg-inverted: oklch(0.145 0.005 285);
 
   /* ── Accent ──────────────────────────────────────────────────────────
-     One accent, used sparingly. A second accent colour is how a technical UI
-     starts looking like a consumer app. */
-  --color-accent: oklch(0.635 0.158 264);
-  --color-accent-hover: oklch(0.695 0.158 264);
-  --color-accent-muted: oklch(0.455 0.095 264);
-  --color-accent-surface: oklch(0.285 0.055 264);
+     Cyan, the one colour the reference look is actually built on. Still a
+     single accent: a second one is how a technical UI starts looking like a
+     consumer app.
+
+     Chroma is deliberately below what a neon treatment would use. On an OLED
+     panel a saturated cyan at full chroma blooms against near-black, and text
+     sitting next to it picks up a halo — legible for a screenshot, tiring for
+     an afternoon. */
+  --color-accent: oklch(0.78 0.135 205);
+  --color-accent-hover: oklch(0.85 0.14 205);
+  --color-accent-muted: oklch(0.55 0.09 205);
+  --color-accent-surface: oklch(0.30 0.055 205);
+
+  /* Used only for hairlines and brackets — never behind text. */
+  --color-accent-line: oklch(0.62 0.11 205);
 
   /* ── Status ──────────────────────────────────────────────────────────── */
   --color-success: oklch(0.715 0.145 152);
@@ -102,4 +118,63 @@
   --spacing-sidebar: 236px;
   --spacing-statusbar: 26px;
   --spacing-titlebar: 38px;
+}
+
+/* ── Instrument surfaces ─────────────────────────────────────────────────
+   The visual grammar of the technical look, kept here so it is applied by
+   name rather than reassembled from utility classes at each call site. */
+
+/* A faint grid, at an opacity where it reads as texture rather than pattern.
+   Above roughly 0.03 it starts competing with text for attention. */
+.grid-surface {
+  background-image:
+    linear-gradient(to right, color-mix(in oklch, var(--color-accent) 4%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in oklch, var(--color-accent) 4%, transparent) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+
+/* Corner brackets. A panel outlined at its corners reads as an instrument
+   readout; the same panel with a full border reads as a card. Drawn with
+   gradients so there are no extra DOM nodes to keep in sync. */
+.bracket {
+  position: relative;
+}
+.bracket::before,
+.bracket::after {
+  content: '';
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border-color: var(--color-accent-line);
+  opacity: 0.55;
+  pointer-events: none;
+}
+.bracket::before {
+  top: -1px;
+  left: -1px;
+  border-top: 1px solid;
+  border-left: 1px solid;
+}
+.bracket::after {
+  right: -1px;
+  bottom: -1px;
+  border-right: 1px solid;
+  border-bottom: 1px solid;
+}
+
+/* Section labels: uppercase, tracked, small. The single cheapest way to make a
+   layout read as instrumentation. */
+.label {
+  font-family: var(--font-mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--color-fg-faint);
+}
+
+/* Every number is monospace. Digits that shift width as a value changes are
+   what makes a live readout feel unstable. */
+.readout {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
 }

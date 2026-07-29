@@ -29,7 +29,7 @@ export function ChatSurface() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="scrollable min-h-0 flex-1">
+      <div className="scrollable grid-surface min-h-0 flex-1">
         {empty ? (
           <EmptyState
             title="Ask MITTA anything"
@@ -61,20 +61,27 @@ function MessageRow({ message }: { message: Message }) {
     <div className={cx('flex flex-col gap-1', isUser && 'items-end')}>
       <div
         className={cx(
-          'selectable max-w-[85%] whitespace-pre-wrap rounded-lg px-3.5 py-2.5 text-sm leading-relaxed',
+          'selectable max-w-[85%] whitespace-pre-wrap rounded-xs px-3.5 py-2.5 text-sm leading-relaxed',
           isUser
-            ? 'bg-surface-active text-fg-primary'
-            : 'bg-surface-raised text-fg-primary',
+            ? // The user's own words sit against a left rule rather than in a
+              // bubble. Chat bubbles are a messaging idiom; this is a console.
+              'border-l-2 border-accent/60 bg-surface-active/40 text-fg-primary'
+            : 'border-l-2 border-border-default bg-surface-raised/60 text-fg-primary',
         )}
       >
         {message.content}
       </div>
       {!isUser && message.provider !== null && (
-        <div className="flex items-center gap-2 text-2xs text-fg-faint">
+        <div className="flex items-center gap-2 pl-3.5 text-2xs text-fg-faint">
           {/* Who answered. R3 requires the active provider be visible so a reply
               that feels different has a reason rather than seeming arbitrary. */}
-          <span className="font-mono">{message.model_id ?? message.provider}</span>
-          {message.latency_ms !== null && <span>{message.latency_ms} ms</span>}
+          <span className="readout">{message.model_id ?? message.provider}</span>
+          {message.latency_ms !== null && (
+            <span className="readout">{message.latency_ms}ms</span>
+          )}
+          {message.register !== null && (
+            <span className="readout text-accent-muted">{message.register}</span>
+          )}
         </div>
       )}
     </div>
@@ -95,19 +102,18 @@ function ActiveTurnRow() {
   return (
     <div className="flex flex-col gap-1.5">
       {(turn.phase !== null || turn.memoryIds.length > 0) && (
-        <div className="flex items-center gap-2 text-2xs text-fg-muted">
+        <div className="flex items-center gap-3 border-l-2 border-accent/30 pl-3.5 text-2xs">
           {turn.phase !== null && (
-            <>
-              <StatusDot tone="warn" pulse />
-              <span>{PHASE_LABEL[turn.phase] ?? turn.phase}</span>
-            </>
+            <span className="flex items-center gap-1.5 text-accent">
+              <StatusDot tone="ok" pulse />
+              <span className="label !text-accent">{PHASE_LABEL[turn.phase] ?? turn.phase}</span>
+            </span>
           )}
           {turn.memoryIds.length > 0 && (
             // Surfaced, not hidden: this is the working set that left the
             // machine on the user's behalf (R5).
-            <span className="text-fg-faint">
-              {turn.memoryIds.length}{' '}
-              {turn.memoryIds.length === 1 ? 'memory' : 'memories'} used
+            <span className="readout text-fg-muted">
+              MEM {turn.memoryIds.length}
             </span>
           )}
         </div>
@@ -124,7 +130,7 @@ function ActiveTurnRow() {
                 tone={activity.ok === null ? 'warn' : activity.ok ? 'ok' : 'error'}
                 pulse={activity.ok === null}
               />
-              <span className="font-mono">{activity.tool}</span>
+              <span className="readout text-accent-muted">{activity.tool}</span>
               {/* What it actually did. R5 and DEC-081: read-only tools never
                   prompt, so this line is the entire "told you" half. */}
               {activity.summary !== '' && (
@@ -138,7 +144,7 @@ function ActiveTurnRow() {
       {turn.approval !== null && <ApprovalCard approval={turn.approval} />}
 
       {text.length > 0 && (
-        <div className="selectable max-w-[85%] whitespace-pre-wrap rounded-lg bg-surface-raised px-3.5 py-2.5 text-sm leading-relaxed text-fg-primary">
+        <div className="selectable max-w-[85%] whitespace-pre-wrap rounded-xs border-l-2 border-border-default bg-surface-raised/60 px-3.5 py-2.5 text-sm leading-relaxed text-fg-primary">
           {text}
           {turn.status === 'running' && <span className="ml-0.5 animate-pulse text-accent">▍</span>}
         </div>
@@ -238,7 +244,7 @@ function Composer({ disabled, draftLength }: { disabled: boolean; draftLength: n
           placeholder={disabled ? 'Not connected to MITTA' : 'Ask MITTA…'}
           aria-label="Message"
           className={cx(
-            'flex-1 resize-none rounded-lg border border-border-subtle bg-surface-input',
+            'flex-1 resize-none rounded-xs border border-border-subtle bg-surface-input',
             'px-3.5 py-2.5 text-sm leading-relaxed text-fg-primary',
             'placeholder:text-fg-faint focus-visible:border-accent focus-visible:outline-none',
             'disabled:opacity-50',

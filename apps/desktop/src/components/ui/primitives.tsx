@@ -17,7 +17,10 @@ export function cx(...parts: (string | false | null | undefined)[]): string {
 type ButtonVariant = 'primary' | 'ghost' | 'danger';
 
 const BUTTON_VARIANTS: Record<ButtonVariant, string> = {
-  primary: 'bg-accent text-fg-primary hover:bg-accent-hover',
+  // Dark text on cyan: at this lightness the accent is bright enough that white
+  // text on it fails contrast, and light-on-bright is what produces the halo
+  // the token comment warns about.
+  primary: 'bg-accent text-fg-inverted hover:bg-accent-hover font-medium',
   ghost: 'bg-transparent text-fg-secondary hover:bg-surface-hover hover:text-fg-primary',
   danger: 'bg-danger-surface text-danger hover:bg-danger hover:text-fg-primary',
 };
@@ -34,7 +37,7 @@ export function Button({ variant = 'ghost', className, ref, ...props }: ButtonPr
       ref={ref}
       type="button"
       className={cx(
-        'inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium',
+        'inline-flex items-center gap-2 rounded-xs px-3 py-1.5 text-sm font-medium',
         'transition-colors duration-[--duration-fast]',
         'disabled:pointer-events-none disabled:opacity-40',
         BUTTON_VARIANTS[variant],
@@ -51,7 +54,9 @@ export function Panel({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
   return (
     <div
       className={cx(
-        'rounded-lg border border-border-subtle bg-surface-raised',
+        // Square, bracketed, hairline. A rounded filled card reads as a
+        // consumer surface; this reads as a readout.
+        'bracket rounded-xs border border-border-subtle bg-surface-raised',
         className,
       )}
       {...props}

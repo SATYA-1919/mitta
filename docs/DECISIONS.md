@@ -2169,3 +2169,58 @@ The general shape of this mistake is worth naming: a target whose name promised
 one thing (*"Run the desktop app"*) and whose body did another, with no step
 that could fail. `ui-build` succeeded, `cargo run` succeeded, and the result was
 wrong. A build that cannot fail is not the same as a build that works.
+
+
+---
+
+## DEC-090 — Instrument, not title sequence
+
+**Decision.** R2's blanket ban on sci-fi styling is amended at the product
+owner's request. The look is now deliberately technical: cyan accent, monospace
+for every number, corner brackets, rule lines, uppercase tracked labels, a faint
+grid, live readouts.
+
+**What was kept out, and why it is not taste.** No animated rings, no pulsing
+glow behind text, no scanlines over content. Each of those degrades legibility
+in a specific way, and this is a window someone keeps open for hours rather than
+a frame someone looks at once.
+
+The accent's chroma sits at 0.135 rather than the ~0.20 a neon treatment would
+use. On an OLED panel a saturated cyan against near-black blooms, and text
+beside it picks up a halo — which photographs beautifully and reads badly.
+
+**Specific substitutions**, since "make it techy" is otherwise unfalsifiable:
+
+| Before | After | Reason |
+| --- | --- | --- |
+| Rounded chat bubbles | Left rule, square corners | Bubbles are a messaging idiom; this is a console |
+| Filled pill for the active nav row | Left rule + tint | A rail of indicators reads as instrumentation |
+| Rounded cards | Corner brackets, hairline border | A bracketed panel reads as a readout |
+| `font-mono` on some values | `.readout` with tabular numerals | Digits that shift width make a live value look unstable |
+| "3 memories used" | `MEM 3` | Labelled, scannable, doesn't grow with the count |
+
+**White text on the cyan button was changed to dark.** At this lightness the
+accent fails contrast against white, and light-on-bright is exactly what
+produces the halo above.
+
+---
+
+## DEC-091 — Shell detection must not depend on a config flag
+
+**The bug.** The app opened, the Rust side started cleanly, the sidecar came up
+with 36 memories and both providers healthy — and the UI said **Disconnected**.
+
+`isTauriAvailable()` checked `window.__TAURI__`, which Tauri v2 injects **only**
+when `withGlobalTauri` is set in `tauri.conf.json`. It was not. Every IPC call
+fell through to its browser fallback, and nothing logged an error — because a
+fallback firing is a *normal* state that the browser path depends on. The
+failure mode was silence.
+
+**Decision.** Detect on `__TAURI_INTERNALS__`, which is present whenever the
+webview is Tauri's, and call through `@tauri-apps/api` rather than a global.
+
+**Why not just set the flag.** Setting it would have worked. It would also have
+left a system whose connectivity depended on a config option that can be changed
+without anything failing — the same shape of defect, waiting. The imports are
+dynamic, so the browser build still never pulls the package in and the palette's
+bundle budget is untouched (2237 bytes, unchanged).

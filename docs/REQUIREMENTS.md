@@ -65,9 +65,24 @@ window without losing context. This constraint is what keeps the two surfaces
 from drifting into inconsistency, and it is a design requirement, not an
 implementation detail.
 
-**Explicitly forbidden.** Iron Man / JARVIS aesthetics. Holograms. Sci-fi
-animation. Glow effects. Neon. Anything that reads as a movie prop rather than a
-tool.
+**Amended 2026-07-29.** The original blanket prohibition — "Iron Man / JARVIS
+aesthetics, holograms, sci-fi animation, glow effects, neon" — is relaxed at the
+product owner's request. He asked for a JARVIS-inspired technical look, with
+latitude on the specifics.
+
+**What is now wanted.** Dense and instrumented: a cyan accent, monospace for
+every number, corner brackets and rule lines instead of soft cards, uppercase
+tracked labels, live readouts, a faint grid.
+
+**What still stands, and why.** No animated rings, no pulsing glow behind text,
+no scanlines over content. Not on taste grounds — those specific things fight
+legibility, and this is a surface used for hours rather than looked at once. The
+accent's chroma is deliberately held below a neon value for the same reason: a
+saturated cyan against near-black blooms on an OLED panel and puts a halo on
+adjacent text.
+
+The line that survives from the original requirement is the useful half: MITTA
+should read as an instrument, not as a title sequence.
 
 **Required surfaces.** Sidebar · chat panel · voice waveform · thinking
 indicator · command palette · project explorer · memory explorer · plugin
@@ -189,3 +204,4 @@ goal. See DEC-020 for the risk and its mitigation.
 | 2026-07-29 | **Phase 5.** Memory engine implemented: six kinds over one table, local ONNX embeddings, FAISS, hybrid retrieval, retention/decay, HTTP surface. R4 and R5 both hold — the embedding model runs on-device and its download is explicit (DEC-050). No requirement changed. |
 | 2026-07-29 | **Phase 4b.** Tauri shell implemented: sidecar supervisor, Keychain, 1 Hz metrics, global hotkey, two windows. R2's three surfaces now exist as real windows. R3's key handling is enforced structurally — no IPC command returns a key (DEC-060). **Wake word confirmed as "MITTA"**; the activation *mechanism* remains open for Phase 6 (R7). |
 | 2026-07-29 | **Personal profile supplied.** `Satya_Personal_Profile.pdf` seeded as 31 typed memories (`make seed-profile`). Settles DEC-033's register rule in the user's own words: concise for simple questions, stepped for difficult technical topics, playful for social. R5 unaffected — the profile is stored locally and only the retrieved working set for a turn is ever sent. |
+| 2026-07-29 | **R2 amended.** JARVIS-inspired technical aesthetic requested and adopted: cyan accent, monospace readouts, corner brackets, grid texture. The prohibition narrows from all sci-fi styling to the specific effects that harm legibility — animated glow, scanlines over content, neon-chroma accents (DEC-090). |

@@ -1,10 +1,9 @@
 /**
  * Typed wrappers over Tauri IPC — Channel B (API_DESIGN.md §7).
  *
- * The Rust shell is not built yet (Phase 4b needs the Rust toolchain), so every
- * call degrades to a documented fallback when the Tauri global is absent. That
- * is what lets the frontend be developed and tested in a plain browser today
- * and pick up the real shell later with no code change.
+ * Every call degrades to a documented fallback when the shell is absent, which
+ * is what lets the frontend run in a plain browser (`make dev`) and in the
+ * desktop app (`make app`) from the same source.
  *
  * The fallbacks are deliberately conservative: absence is reported as absence,
  * never as a fabricated success. `getPermissionsStatus` returning "granted" in
@@ -36,30 +35,31 @@ export type SidecarState = 'starting' | 'ready' | 'restarting' | 'failed';
 export type PermissionName = 'accessibility' | 'screenRecording' | 'microphone';
 export type PermissionState = 'granted' | 'denied' | 'notDetermined' | 'unknown';
 
-type InvokeFn = <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
-
-interface TauriGlobal {
-  core?: { invoke?: InvokeFn };
-  event?: {
-    listen?: <T>(event: string, handler: (e: { payload: T }) => void) => Promise<() => void>;
-  };
-}
-
-function tauri(): TauriGlobal | null {
-  const global = globalThis as { __TAURI__?: TauriGlobal };
-  return global.__TAURI__ ?? null;
-}
-
+/**
+ * Detecting the shell.
+ *
+ * The first version checked `window.__TAURI__`, which Tauri v2 injects **only**
+ * when `withGlobalTauri` is set. It was not, so every call fell through to its
+ * browser fallback and the app reported "Disconnected" while the Rust side ran
+ * perfectly — nothing logged an error, because a fallback firing is a normal
+ * state that the browser path depends on.
+ *
+ * `__TAURI_INTERNALS__` is present whenever the webview is Tauri's, regardless
+ * of that flag, so detection no longer depends on a config option that can be
+ * changed without anything failing.
+ */
 export function isTauriAvailable(): boolean {
-  return typeof tauri()?.core?.invoke === 'function';
+  return '__TAURI_INTERNALS__' in globalThis;
 }
 
 async function invoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
-  const fn = tauri()?.core?.invoke;
-  if (fn === undefined) {
+  if (!isTauriAvailable()) {
     throw new ShellUnavailableError(command);
   }
-  return fn<T>(command, args);
+  // Imported lazily so the browser build never pulls the package in, and so a
+  // module-load failure surfaces as a failed call rather than a blank window.
+  const { invoke: tauriInvoke } = await import('@tauri-apps/api/core');
+  return tauriInvoke<T>(command, args);
 }
 
 export class ShellUnavailableError extends Error {
@@ -165,11 +165,13 @@ export async function getPermissionsStatus(): Promise<Record<PermissionName, Per
  * entire session.
  */
 export async function listen<T>(event: string, handler: (payload: T) => void): Promise<() => void> {
-  const listener = tauri()?.event?.listen;
-  if (listener === undefined) {
+  if (!isTauriAvailable()) {
+    // A browser has no Rust side to emit anything. A no-op unsubscribe keeps
+    // every caller's teardown path identical.
     return () => {};
   }
-  return listener<T>(event, (e) => handler(e.payload));
+  const { listen: tauriListen } = await import('@tauri-apps/api/event');
+  return tauriListen<T>(event, (e) => handler(e.payload));
 }
 
 export function onMetrics(handler: (metrics: SystemMetrics) => void): Promise<() => void> {
