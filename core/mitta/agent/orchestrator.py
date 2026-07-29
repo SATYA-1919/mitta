@@ -26,6 +26,7 @@ from mitta.conversations.models import (
     InputKind,
     MessageDraft,
     MessageRole,
+    Register,
     TurnStatus,
 )
 from mitta.conversations.repository import ConversationRepository
@@ -33,6 +34,7 @@ from mitta.errors import MittaError, ProviderError
 from mitta.llm.gateway import LLMGateway
 from mitta.llm.models import ChatRequest, ModelDescriptor, TaskClass
 from mitta.memory.service import MemoryService
+from mitta.personality.rewriter import PersonalityLayer
 from mitta.telemetry.logging import get_logger
 
 log = get_logger(__name__)
@@ -77,11 +79,13 @@ class Orchestrator:
         memory: MemoryService,
         gateway: LLMGateway,
         extractor: MemoryExtractor | None = None,
+        personality: PersonalityLayer | None = None,
     ) -> None:
         self._conversations = conversations
         self._memory = memory
         self._gateway = gateway
         self._extractor = extractor
+        self._personality = personality
 
     async def run(
         self,
@@ -183,7 +187,21 @@ class Orchestrator:
                 {"code": "internal.error", "message": "Something went wrong.", "retryable": False},
             )
 
-        answer = "".join(collected)
+        raw_answer = "".join(collected)
+        answer = raw_answer
+        register: Register | None = None
+        styled = False
+
+        if self._personality is not None and raw_answer and failure is None:
+            yield TurnEvent("turn.thinking", {"phase": "styling"})
+            style = await self._personality.apply(raw_answer, user_text=text)
+            answer = style.text
+            register = Register(style.register.value)
+            # `styled` records that the pass ran and changed something. A no-op
+            # rewrite must not make the UI swap text it already displayed
+            # (DEC-046), so the two are not the same flag.
+            styled = style.changed
+
         latency_ms = int((time.monotonic() - started) * 1000)
         message_id: str | None = None
 
@@ -197,10 +215,13 @@ class Orchestrator:
                     provider=provider,
                     model_id=model_id,
                     latency_ms=latency_ms,
-                    # The personality layer has not landed. `styled=False` is the
-                    # honest record: claiming otherwise would make the audit
-                    # trail (`content_raw`) lie about work that never ran.
-                    styled=False,
+                    register=register,
+                    # The pre-personality text, kept only when a rewrite actually
+                    # happened. This is what makes DEC-008's claim — that the
+                    # style pass changes expression and never meaning — auditable
+                    # rather than asserted.
+                    content_raw=raw_answer if styled else None,
+                    styled=styled,
                 ),
             )
             message_id = message.id
@@ -209,7 +230,8 @@ class Orchestrator:
                 {
                     "message_id": message.id,
                     "content": answer,
-                    "styled": False,
+                    "styled": styled,
+                    "register": register.value if register else None,
                     "provider": provider,
                     "model_id": model_id,
                 },
@@ -218,6 +240,7 @@ class Orchestrator:
         self._conversations.end_turn(
             turn.id,
             status=TurnStatus.FAILED if failure is not None else TurnStatus.COMPLETED,
+            register=register,
             error=(
                 {"code": failure.code, "message": failure.message} if failure is not None else None
             ),

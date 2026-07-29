@@ -1792,3 +1792,77 @@ safety — it is data loss with no error message. Strict parsing belongs where a
 mistake should stop the system; a model's JSON is not that place, because the
 model will be wrong in a new way next week and the correct response is to keep
 the turn working.
+
+
+---
+---
+
+# Phase 12 — Personality Layer
+
+---
+
+## DEC-076 — The rewrite is verified, not trusted
+
+**Decision.** After the personality layer rewrites a reply, the result is
+checked against the original. Every protected span must still be present, no
+number may be introduced that was not there, and the length must stay within
+bounds. On any violation the rewrite is **discarded** and the original text is
+used.
+
+**Why verification rather than a better prompt.** "Do not change file paths" is
+a request to a language model. "The path is still in the output" is a fact. The
+difference is the whole safety argument for running a second model over every
+reply: with verification, the worst case is a reply that reads plainly. Without
+it, the worst case is a reply telling the user to `rm -rf ~/Documnets`.
+
+Protected: fenced and inline code, absolute and relative paths, URLs, numbers
+with units, and identifiers like `MITTA-1481`. The invented-number check is the
+subtle one — a rewrite that keeps "47 files" but adds "about 50 in total" has
+preserved every span and still fabricated a fact.
+
+**Never restyled at all**: text containing a confirmation prompt or a refusal.
+`ARCHITECTURE.md` §7 requires it and the reason is concrete — "are you sure you
+want to delete 47 files" must not become "shall i nuke these ra".
+
+---
+
+## DEC-077 — Register is a deterministic heuristic, not a model call
+
+**Decision.** `classify()` picks playful or serious from the *user's* message
+using keyword and shape rules. No model is asked.
+
+**Why not a model.** Three reasons, in order of weight:
+
+1. **Stability.** A probabilistic classifier gives the same question a different
+   voice on different days. That reads as instability, not personality.
+2. **Cost and latency.** It runs on every turn, before the rewrite that also
+   runs on every turn.
+3. **Arguability.** A rule that can be read is a rule the user can predict and
+   disagree with. `RegisterDecision.reason` is surfaced for exactly that.
+
+**Classified from the request, not the reply.** Judging by the answer would let
+a verbose model talk itself into a serious register. What was asked determines
+how it should be answered.
+
+**Ties break serious.** A stepped technical explanation delivered as "yeah just
+do the thing ra" is useless; a casual remark delivered plainly is merely dull.
+The asymmetry decides the default.
+
+---
+
+## DEC-078 — `styled` and `changed` are different flags
+
+**Decision.** `styled` on the message row records that the personality pass
+*ran*. `StyleResult.changed` records that it *did something*. `content_raw` is
+stored only when both are true.
+
+**Why the distinction is load-bearing.** DEC-046 has the UI swap the streamed
+text for the settled text in one atomic operation. If a no-op rewrite reported
+`styled: true`, the UI would replace displayed text with an identical string —
+a visible flicker for a change that did not happen. And `content_raw` would
+record a "before" identical to the "after", making the audit trail claim a
+rewrite occurred when none did.
+
+Verified live: playful lowercased a reply and removed "I'd be happy to";
+serious kept a full stepped explanation intact and stripped only the padding.
+Both reported `changed: true`. A reply the layer left alone reports `false`.

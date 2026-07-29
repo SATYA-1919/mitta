@@ -46,6 +46,7 @@ from mitta.os_adapter.base import OSAdapter
 from mitta.os_adapter.factory import create_os_adapter
 from mitta.persistence.database import Database
 from mitta.persistence.migrations import migrate
+from mitta.personality.rewriter import PersonalityLayer
 from mitta.telemetry.logging import get_logger, setup_logging
 from mitta.telemetry.redaction import SecretRedactor
 
@@ -156,7 +157,12 @@ def build_runtime(
     )
 
     extractor = MemoryExtractor(memory, gateway, redactor=redactor)
-    orchestrator = Orchestrator(conversations, memory, gateway, extractor)
+    personality = PersonalityLayer(
+        gateway,
+        enabled=settings.personality.enabled,
+        intensity=settings.personality.intensity,
+    )
+    orchestrator = Orchestrator(conversations, memory, gateway, extractor, personality)
 
     app = create_app(
         settings=settings,
