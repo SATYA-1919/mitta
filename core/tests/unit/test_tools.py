@@ -104,3 +104,10 @@ class TestCapabilityStatement:
 
         assert "open_url" in rendered
         assert "text-only" in rendered
+
+    def test_the_preamble_forbids_leaking_a_tool_name(self) -> None:
+        # Observed: "I can open Spotify using the open_app tool." Listing the
+        # tools to the model is what taught it to name them to the user.
+        rendered = CAPABILITY_PREAMBLE.format(capabilities="- open_app: Launch an application")
+
+        assert "Never say a tool's name to the user" in rendered

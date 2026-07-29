@@ -73,7 +73,11 @@ this turn: do not say the action is done and do not say it is happening. Say \
 you can do it and that it did not go through this time.
 
 If a request genuinely needs something not on that list, name the specific \
-thing you are missing instead of describing yourself as incapable in general."""
+thing you are missing instead of describing yourself as incapable in general.
+
+Never say a tool's name to the user. "open_app" and "web_search" are internal \
+labels; the user asked you to open something or look something up, and that is \
+how you refer to it."""
 
 
 @dataclass(frozen=True, slots=True)
