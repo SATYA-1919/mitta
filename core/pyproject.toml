@@ -1,0 +1,97 @@
+[project]
+name = "mitta-core"
+version = "0.1.0"
+description = "MITTA agent runtime — local-first desktop AI companion sidecar"
+requires-python = ">=3.12"
+license = { text = "Proprietary" }
+
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "httpx2>=2.9",           # starlette.testclient requires this, not httpx 0.x
+    "mypy>=1.13",
+    "ruff>=0.8",
+    "import-linter>=2.1",
+]
+
+[project.scripts]
+mitta-core = "mitta.__main__:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["mitta"]
+
+# ---------------------------------------------------------------------------
+# Typing — strict, from the first commit. Retrofitting strict typing onto a
+# grown codebase is a project of its own (PROJECT_STRUCTURE.md §8).
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unreachable = true
+disallow_any_explicit = false
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
+
+# ---------------------------------------------------------------------------
+# Lint
+# ---------------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["."]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",    # pycodestyle
+    "F",         # pyflakes
+    "I",         # isort
+    "N",         # pep8-naming
+    "UP",        # pyupgrade
+    "B",         # bugbear
+    "A",         # builtin shadowing
+    "C4",        # comprehensions
+    "SIM",       # simplify
+    "TID",       # tidy imports
+    "RUF",
+    "S",         # bandit — security
+]
+ignore = [
+    "S101",      # assert: intended in tests
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests legitimately hold fake tokens, spawn the sidecar, and open loopback URLs.
+# Scoped here rather than as inline noqa so the exemption is visible in one place.
+"tests/*" = [
+    "S105",  # hardcoded password — test tokens
+    "S106",  # hardcoded password argument
+    "S310",  # urllib on a non-audited URL — always 127.0.0.1 here
+    "S603",  # subprocess without shell=True — that is the safe form
+]
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "parents"
+
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+filterwarnings = ["error"]
+addopts = "-q --strict-markers"

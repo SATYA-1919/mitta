@@ -183,3 +183,5 @@ goal. See DEC-020 for the risk and its mitigation.
 | --- | --- |
 | 2026-07-29 | Initial requirements from Phase 1 review. Platform narrowed to macOS-first (supersedes cross-platform scope in DEC-001/DEC-003). Model posture changed to two-key BYOK (amends DEC-007). Local-only storage ratified (confirms DEC-005/DEC-006). |
 | 2026-07-29 | **Phase 2.** R8 confirmed: "completely cloud" applies to *reasoning models only* — embeddings remain on-device, so R5 stays enforceable (DEC-022). No requirement changed. Design records added: `PROJECT_STRUCTURE.md`, `API_DESIGN.md`, `DATABASE_DESIGN.md`. |
+| 2026-07-29 | **Phase 2 amendment.** Personality length is governed by *register*, not a length threshold (DEC-033). Default is playful and short; serious register permits length. Closes the open question in `PERSONALITY_PROFILE.md`. |
+| 2026-07-29 | **Phase 3.** Backend foundation implemented: config, telemetry, OS adapter, persistence, migrations, API skeleton. No requirement changed. R3 still pending — **API keys not yet requested**; the LLM gateway lands in Phase 7. |

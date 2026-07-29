@@ -747,3 +747,192 @@ annoying; the register is reported on the wire so the UI can show it; and a
 manual override is available. Misclassification in the remaining space costs
 tone, not correctness.
 
+---
+---
+
+# Phase 3 — Backend Foundation
+
+---
+
+## DEC-034 — Stdlib `logging` with a JSON formatter, not `structlog`
+
+**Problem.** Structured logging is required, and DEC-017 requires that no API key
+can reach a log line.
+
+**Options.** (a) `structlog` with a redaction processor. (b) Stdlib `logging`
+with a JSON formatter and a redaction `Filter`. (c) `loguru`.
+
+**Decision.** (b).
+
+**Why.** The redaction requirement decides this, not ergonomics. Keys reach logs
+through code we did not write — uvicorn logging a header, `httpx` logging a
+request, a traceback carrying a client `repr()`. A structlog processor chain only
+sees records that went *through structlog*, so every one of those paths bypasses
+it. A `logging.Filter` on the root **handlers** sees every record from every
+library unconditionally.
+
+**The detail that makes it work.** The filter is attached to handlers, never to
+loggers. A `Filter` on a `Logger` is not applied to records propagated from child
+loggers, so the obvious implementation — filter on the root logger — silently
+misses exactly the third-party traffic most likely to contain a key.
+
+**Trade-off accepted.** Less ergonomic than structlog's binding API. Recovered
+in part by `SafeExtraAdapter` (DEC-036).
+
+---
+
+## DEC-035 — One serialised write connection, a read pool, and `BEGIN IMMEDIATE`
+
+**Problem.** SQLite permits a single writer. Background memory consolidation
+writes while the user is mid-conversation.
+
+**Options.** (a) Several read/write connections, relying on `busy_timeout` to
+resolve collisions. (b) One write connection guarded by a lock, plus a pool of
+`query_only` read connections.
+
+**Decision.** (b), with `BEGIN IMMEDIATE` and reentrant transactions.
+
+**Why.** Option (a) produces intermittent, load-dependent `SQLITE_BUSY` failures
+that appear only under real use and are miserable to reproduce. Serialising in
+application code makes the constraint explicit and testable. WAL is what makes it
+acceptable: the consolidation writer never blocks a reader.
+
+`BEGIN IMMEDIATE` rather than the default deferred begin, because a transaction
+that reads, decides, then writes would otherwise acquire the write lock *after*
+the read and can fail at that point — the classic upgrade deadlock. Taking the
+lock up front converts it into a clean bounded wait.
+
+Transactions are reentrant: a nested `write()` joins the enclosing transaction
+rather than opening a second one, so a repository method behaves identically
+called standalone or inside a larger unit of work. Verified by test — an outer
+rollback discards the inner block's writes.
+
+---
+
+## DEC-036 — Guard rails for two stdlib footguns
+
+**Problem.** Two stdlib behaviours produced real failures during Phase 3, both
+of which would recur at every future call site.
+
+**`executescript` breaks migration atomicity.** It issues an implicit COMMIT
+before running, ending the transaction the runner had opened. The DDL and its
+`schema_migrations` row would land in separate transactions, so a crash between
+them leaves a schema that is applied but unrecorded — the next boot then fails
+with "table already exists" and needs manual repair.
+
+**Decision.** Split the script with `sqlite3.complete_statement` (which
+implements SQLite's own rule and handles `CREATE TRIGGER … BEGIN … END;` bodies
+correctly) and execute the statements individually inside the runner's
+transaction. Naive splitting on `;` would corrupt every trigger in the schema.
+
+**`extra=` keys collide with `LogRecord` attributes.** `Logger.makeRecord` raises
+`KeyError: Attempt to overwrite 'name'` when an `extra` dict contains any
+reserved attribute name — `name`, `module`, `filename`, `process`, `args` and
+about fifteen others. The colliding names are precisely the ones a caller reaches
+for naturally, and the failure happens at log time, taking down whatever was
+being logged about.
+
+**Decision.** `get_logger` returns a `SafeExtraAdapter` that renames colliding
+keys with a trailing underscore.
+
+**Why a wrapper rather than fixing the call site.** The offending call was
+`extra={"name": migration.name}` in the migration runner — obviously correct on
+reading, and it broke startup. Renaming that one key would have left every future
+call site holding the same loaded gun. Renaming rather than dropping keeps the
+value and makes the collision visible in the output.
+
+**How it was found.** Not by the 96 unit tests that passed at the time — by the
+first real process boot. See DEC-038.
+
+---
+
+## DEC-037 — The config file is a settings *source*, not constructor arguments
+
+**Problem.** Precedence must be: explicit overrides → environment → config file →
+defaults. The environment is how the Rust supervisor injects the session token
+and storage root, so it must beat a file on disk.
+
+**Decision.** Supply `config.json` to pydantic-settings as a
+`JsonConfigSettingsSource` with `deep_merge=True`, not by passing parsed contents
+as `Settings(**data)`.
+
+**Why.** Init keyword arguments have the *highest* precedence in
+pydantic-settings. Passing file contents that way inverted the intended order and
+let a stale `config.json` silently override the supervisor's environment —
+including the storage root, which would have pointed the sidecar at the wrong
+database. As a source it also merges per leaf, so `MITTA_MEMORY__DECAY_LAMBDA`
+overrides one nested value without discarding the rest of the file's `memory`
+block.
+
+**Related.** `Settings` has no field capable of holding a secret, and
+`load_settings` raises if `session_token` appears in the file at all — a token in
+a config file means it was written to disk, which DEC-017 forbids. `__repr__` and
+`__str__` are overridden so a token can never reach a traceback frame.
+
+---
+
+## DEC-038 — An integration test that spawns the real process
+
+**Problem.** Everything else in the suite constructs the FastAPI app in-process,
+where the readiness handshake, ephemeral bind, descriptor file, signal handling
+and process-level logging setup simply do not run.
+
+**Decision.** `core/tests/integration/test_sidecar_process.py` spawns the actual
+sidecar the Rust supervisor will spawn and drives it over real HTTP.
+
+**Why.** This is not belt-and-braces. The `extra={"name": ...}` collision in
+DEC-036 was a hard startup crash that **passed all 96 unit tests** and failed on
+the first real boot. In-process tests cannot see that class of bug by
+construction, and it is the class most likely to ship.
+
+It also verifies the properties that are otherwise only asserted in prose: the
+descriptor is mode 0600, the database is mode 0600, the session token does not
+appear anywhere in the log file, and SIGTERM exits 0 and removes the descriptor —
+an orphaned sidecar holding an open agent loop is a real failure mode.
+
+---
+
+## DEC-039 — Layer contracts order by module dependency, not by pipeline position
+
+**Problem.** The first `import-linter` run failed against correct code:
+`mitta.config` was not permitted to import `mitta.os_adapter`.
+
+**Decision.** Order the layers contract by actual module dependency —
+`errors → os_adapter → config → telemetry → persistence → runtime → api` — and
+document why it differs from `ARCHITECTURE.md` §3.
+
+**Why.** ARCHITECTURE.md §3 numbers the *agent pipeline* and places the OS
+Adapter at layer 9, near the bottom of that stack. That numbering describes
+request flow. Module dependency is a different axis: `config.paths` must ask the
+platform where the storage root lives, so `os_adapter` is a dependency *of*
+configuration and belongs below it. Encoding the pipeline numbers as import
+constraints produced a contract that was simply wrong.
+
+**Worth recording because it is the general case.** Conflating "what calls what
+at runtime" with "what imports what at build time" is a standard way layered
+architectures acquire contracts nobody can satisfy, followed by exemptions that
+hollow the contract out. The contract is now enforced with no exemptions.
+
+---
+
+## DEC-040 — ULIDs implemented in-tree, monotonic within a millisecond
+
+**Problem.** Every entity needs an external identifier (DATABASE_DESIGN.md §1).
+
+**Decision.** ULID — 48-bit timestamp plus 80 bits of randomness, Crockford
+base32 — implemented in `mitta/ids.py` rather than taken from PyPI, and monotonic
+within a millisecond.
+
+**Why ULID over UUID4.** They sort lexicographically by creation time, so
+`ORDER BY id` is chronological and a B-tree index stays dense instead of
+scattering inserts across the keyspace.
+
+**Why in-tree.** Forty lines, one fewer supply-chain dependency in a
+security-sensitive local application, and the monotonicity guarantee below is one
+several published implementations do not provide.
+
+**Why monotonic.** Within a single millisecond the random component is
+incremented rather than redrawn, so ids created in the same tick still sort in
+creation order. Without it, "the most recent message" is non-deterministic under
+load — a real hazard given ULID ordering is used as the sort key.
+
