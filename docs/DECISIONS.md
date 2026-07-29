@@ -2109,3 +2109,32 @@ collaborators is an invitation to exactly this.
                    ANSWER: I cannot write files.
       -> APPROVE   ran: ok=True · Saved ideas.md.
                    file on disk: try faiss HNSW
+
+
+---
+
+## DEC-088 — The approval card shows arguments, focuses Deny, and has no "always allow"
+
+Three choices in one small component, each one a refusal to make the prompt
+easier to dismiss.
+
+**The exact arguments are shown, not a summary.** The token binds to a hash of
+these values (DEC-080), so what is displayed is precisely what can run.
+Rendering "write a note" while approving `{"filename": "../../.ssh/config"}`
+would make the binding worthless — the user would be agreeing to something they
+were not shown.
+
+**Focus lands on Deny.** A prompt can appear while the user is mid-keystroke,
+and Enter or Space on a focused Approve would authorise something they never
+read. The safe action is the one that costs a click to undo.
+
+**There is no "always allow".** It is the first thing anyone asks for and it
+would undo the design: a remembered blanket approval is an approval not bound to
+parameters, which is the single property the whole token scheme exists to keep.
+Per-tool defaults belong in Settings, where they are a considered decision
+rather than a click made to clear a dialog.
+
+**Only the request id goes back to the server.** The parameters stay where they
+were recorded; the token is minted from those. A client returning altered
+arguments gets a token that fails verification against the ones actually used —
+so a compromised webview cannot widen an approval it was granted.

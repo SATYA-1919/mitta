@@ -11,7 +11,7 @@ import { useEffect, useRef } from 'react';
 
 import { Button, cx, EmptyState, Kbd, StatusDot } from '@/components/ui/primitives';
 import type { Message } from '@/lib/api/client';
-import { displayText, useStore } from '@/state/store';
+import { displayText, type PendingApproval, useStore } from '@/state/store';
 
 export function ChatSurface() {
   const { messages, activeTurn, draft, chatError, connection } = useStore();
@@ -113,6 +113,30 @@ function ActiveTurnRow() {
         </div>
       )}
 
+      {turn.tools.length > 0 && (
+        <div className="flex flex-col gap-1">
+          {turn.tools.map((activity, index) => (
+            <div
+              key={`${activity.tool}-${index}`}
+              className="flex items-center gap-2 text-2xs text-fg-muted"
+            >
+              <StatusDot
+                tone={activity.ok === null ? 'warn' : activity.ok ? 'ok' : 'error'}
+                pulse={activity.ok === null}
+              />
+              <span className="font-mono">{activity.tool}</span>
+              {/* What it actually did. R5 and DEC-081: read-only tools never
+                  prompt, so this line is the entire "told you" half. */}
+              {activity.summary !== '' && (
+                <span className="truncate text-fg-faint">{activity.summary}</span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {turn.approval !== null && <ApprovalCard approval={turn.approval} />}
+
       {text.length > 0 && (
         <div className="selectable max-w-[85%] whitespace-pre-wrap rounded-lg bg-surface-raised px-3.5 py-2.5 text-sm leading-relaxed text-fg-primary">
           {text}
@@ -125,6 +149,52 @@ function ActiveTurnRow() {
           {turn.error}
         </div>
       )}
+    </div>
+  );
+}
+
+function ApprovalCard({ approval }: { approval: PendingApproval }) {
+  const resolve = useStore((s) => s.resolveApproval);
+  const deny = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    // Focus lands on Deny, not Approve. A stray Enter or Space while a prompt
+    // appears should not authorise something — the safe action is the one that
+    // costs a click to undo.
+    deny.current?.focus();
+  }, []);
+
+  return (
+    <div
+      role="alertdialog"
+      aria-label="MITTA needs permission"
+      className="max-w-[85%] rounded-lg border border-warning/40 bg-surface-raised p-3.5"
+    >
+      <div className="flex items-center gap-2 text-2xs text-warning">
+        <StatusDot tone="warn" pulse />
+        <span>MITTA needs your permission</span>
+      </div>
+
+      <p className="mt-2 text-sm leading-relaxed text-fg-primary">{approval.prompt}</p>
+
+      {/* The exact arguments, not a summary. The approval token binds to a hash
+          of these values, so what is shown is what can run — approving "3 files"
+          cannot be replayed against 300 (DEC-080). */}
+      <pre className="scrollable selectable mt-2 max-h-40 rounded-md bg-surface-input p-2 font-mono text-2xs text-fg-secondary">
+        {approval.tool}({JSON.stringify(approval.params, null, 2)})
+      </pre>
+
+      <div className="mt-3 flex items-center gap-2">
+        <Button ref={deny} onClick={() => resolve(false)}>
+          Deny
+        </Button>
+        <Button variant="primary" onClick={() => resolve(true)}>
+          Approve once
+        </Button>
+        {/* Deliberately no "always allow". A remembered blanket approval is an
+            approval that is not bound to parameters, which is the property the
+            whole token design exists to keep. */}
+      </div>
     </div>
   );
 }

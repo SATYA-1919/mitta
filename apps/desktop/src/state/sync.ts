@@ -33,6 +33,18 @@ interface MessageData {
 interface ContextData {
   memory_ids: string[];
 }
+interface ToolData {
+  tool?: string;
+  ok?: boolean;
+  summary?: string;
+  reason?: string;
+}
+interface ApprovalData {
+  request_id: string;
+  tool: string;
+  params?: Record<string, unknown>;
+  prompt: string;
+}
 interface ErrorData {
   code: string;
   message: string;
@@ -68,6 +80,31 @@ export function bindTransport(
         // The working set that left the machine on the user's behalf. Shown in
         // the UI rather than only logged — R5's enforcement clause.
         state.setTurnContext((frame.data as ContextData).memory_ids ?? []);
+        break;
+      }
+      case 'turn.tool_started': {
+        state.toolStarted(String((frame.data as ToolData).tool ?? ''));
+        break;
+      }
+      case 'turn.tool_finished': {
+        const data = frame.data as ToolData;
+        state.toolFinished(String(data.tool ?? ''), data.ok === true, String(data.summary ?? ''));
+        break;
+      }
+      case 'turn.tool_denied': {
+        const data = frame.data as ToolData;
+        state.toolFinished(String(data.tool ?? ''), false, String(data.reason ?? 'denied'));
+        break;
+      }
+      case 'turn.approval_required': {
+        // The turn is now stopped on the server, waiting. Nothing has run.
+        const data = frame.data as ApprovalData;
+        state.requestApproval({
+          requestId: data.request_id,
+          tool: data.tool,
+          params: data.params ?? {},
+          prompt: data.prompt,
+        });
         break;
       }
       case 'turn.delta': {

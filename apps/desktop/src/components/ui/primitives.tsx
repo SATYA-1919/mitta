@@ -24,11 +24,14 @@ const BUTTON_VARIANTS: Record<ButtonVariant, string> = {
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant;
+  /** React 19 passes `ref` as an ordinary prop; no forwardRef needed. */
+  ref?: React.Ref<HTMLButtonElement>;
 }
 
-export function Button({ variant = 'ghost', className, ...props }: ButtonProps) {
+export function Button({ variant = 'ghost', className, ref, ...props }: ButtonProps) {
   return (
     <button
+      ref={ref}
       type="button"
       className={cx(
         'inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium',

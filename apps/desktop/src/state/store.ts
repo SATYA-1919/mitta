@@ -36,7 +36,26 @@ export type ThinkingPhase = 'retrieving' | 'planning' | 'reasoning' | 'executing
 
 export type Register = 'playful' | 'serious';
 
+/** A tool call waiting on the user. Nothing has run yet. */
+export interface PendingApproval {
+  requestId: string;
+  tool: string;
+  /** The exact arguments. The token binds to these, so the user is approving
+   *  these values and not a paraphrase of them. */
+  params: Record<string, unknown>;
+  prompt: string;
+}
+
+/** A tool call that has already happened, shown so the user sees what was done. */
+export interface ToolActivity {
+  tool: string;
+  ok: boolean | null;
+  summary: string;
+}
+
 export interface TurnState {
+  approval: PendingApproval | null;
+  tools: ToolActivity[];
   /** Memory ids the server reported using. Surfaced so the working set that
    *  left the machine is inspectable (R5). */
   memoryIds: string[];
@@ -98,6 +117,10 @@ export interface TurnSlice {
   newConversation: () => void;
   openConversation: (conversationId: string) => Promise<void>;
   setTurnContext: (memoryIds: string[]) => void;
+  requestApproval: (approval: PendingApproval) => void;
+  resolveApproval: (approved: boolean) => void;
+  toolStarted: (tool: string) => void;
+  toolFinished: (tool: string, ok: boolean, summary: string) => void;
   setTurnProvenance: (provider: string | null, modelId: string | null) => void;
 
   beginTurn: (turnId: string, conversationId: string) => void;
@@ -188,6 +211,52 @@ export const useStore = create<AppState>((set, get) => ({
   setTurnContext: (memoryIds) =>
     set((s) => (s.activeTurn === null ? s : { activeTurn: { ...s.activeTurn, memoryIds } })),
 
+  requestApproval: (approval) =>
+    set((s) => (s.activeTurn === null ? s : { activeTurn: { ...s.activeTurn, approval } })),
+
+  resolveApproval: (approved) => {
+    const state = get();
+    const approval = state.activeTurn?.approval;
+    if (approval === undefined || approval === null || state.transport === null) return;
+
+    // The request id is all that goes back. The parameters stay on the server,
+    // which mints the token from what it recorded when it raised the prompt —
+    // a client returning altered arguments would get a token that fails
+    // verification against the ones actually used.
+    state.transport.send(approved ? 'turn.approve' : 'turn.deny', {
+      request_id: approval.requestId,
+    });
+    set((s) => (s.activeTurn === null ? s : { activeTurn: { ...s.activeTurn, approval: null } }));
+  },
+
+  toolStarted: (tool) =>
+    set((s) =>
+      s.activeTurn === null
+        ? s
+        : {
+            activeTurn: {
+              ...s.activeTurn,
+              tools: [...s.activeTurn.tools, { tool, ok: null, summary: '' }],
+            },
+          },
+    ),
+
+  toolFinished: (tool, ok, summary) =>
+    set((s) => {
+      if (s.activeTurn === null) return s;
+      const tools = [...s.activeTurn.tools];
+      // Update the last matching entry rather than appending: a tool can be
+      // called twice in a turn, and two rows for one call would read as two
+      // actions having been taken.
+      for (let i = tools.length - 1; i >= 0; i -= 1) {
+        if (tools[i]?.tool === tool && tools[i]?.ok === null) {
+          tools[i] = { tool, ok, summary };
+          break;
+        }
+      }
+      return { activeTurn: { ...s.activeTurn, tools } };
+    }),
+
   setTurnProvenance: (provider, modelId) =>
     set((s) =>
       s.activeTurn === null ? s : { activeTurn: { ...s.activeTurn, provider, modelId } },
@@ -216,6 +285,8 @@ export const useStore = create<AppState>((set, get) => ({
         memoryIds: [],
         provider: null,
         modelId: null,
+        approval: null,
+        tools: [],
       },
     })),
   setPhase: (phase) =>

@@ -8,6 +8,7 @@ import { bindTransport } from './sync';
 
 /** Stands in for a TransportClient so frames can be injected directly. */
 class FakeTransport {
+  readonly sent: { type: string; data: unknown }[] = [];
   private frameHandlers: FrameHandler[] = [];
   private stateHandlers: StateHandler[] = [];
 
@@ -32,6 +33,11 @@ class FakeTransport {
 
   emitState(state: Parameters<StateHandler>[0], detail?: string): void {
     for (const handler of [...this.stateHandlers]) handler(state, detail);
+  }
+
+  send(type: string, data: unknown): boolean {
+    this.sent.push({ type, data });
+    return true;
   }
 
   asClient(): TransportClient {
@@ -172,5 +178,88 @@ describe('teardown', () => {
 
     expect(useStore.getState().activeTurn).toBeNull();
     expect(useStore.getState().connection).toBe('idle');
+  });
+});
+
+describe('tool approval', () => {
+  it('surfaces a pending approval without running anything', () => {
+    const transport = new FakeTransport();
+    bindTransport(transport.asClient());
+
+    transport.emit('turn.accepted', { turn_id: 'trn_1', conversation_id: 'cnv_1' });
+    transport.emit('turn.approval_required', {
+      request_id: 'req_1',
+      tool: 'write_note',
+      params: { filename: 'ideas.md', content: 'x' },
+      prompt: "Write 1 characters to 'ideas.md'?",
+    });
+
+    const approval = useStore.getState().activeTurn?.approval;
+    expect(approval?.requestId).toBe('req_1');
+    // The exact arguments, because the token binds to a hash of them — the user
+    // is approving these values, not a paraphrase.
+    expect(approval?.params).toEqual({ filename: 'ideas.md', content: 'x' });
+  });
+
+  it('sends only the request id back', () => {
+    // The parameters stay on the server, which mints the token from what it
+    // recorded. A client returning altered arguments would get a token that
+    // fails verification against the ones actually used.
+    const transport = new FakeTransport();
+    bindTransport(transport.asClient());
+    useStore.setState({ transport: transport.asClient() });
+
+    transport.emit('turn.accepted', { turn_id: 'trn_1', conversation_id: 'cnv_1' });
+    transport.emit('turn.approval_required', {
+      request_id: 'req_1',
+      tool: 'write_note',
+      params: { filename: 'ideas.md' },
+      prompt: 'Write?',
+    });
+    useStore.getState().resolveApproval(true);
+
+    expect(transport.sent).toEqual([
+      { type: 'turn.approve', data: { request_id: 'req_1' } },
+    ]);
+    expect(useStore.getState().activeTurn?.approval).toBeNull();
+  });
+
+  it('records what a tool did, not just that it ran', () => {
+    const transport = new FakeTransport();
+    bindTransport(transport.asClient());
+
+    transport.emit('turn.accepted', { turn_id: 'trn_1', conversation_id: 'cnv_1' });
+    transport.emit('turn.tool_started', { tool: 'web_search' });
+    transport.emit('turn.tool_finished', {
+      tool: 'web_search',
+      ok: true,
+      summary: 'Ballon d\'Or winners',
+    });
+
+    const tools = useStore.getState().activeTurn?.tools ?? [];
+    expect(tools).toHaveLength(1);
+    expect(tools[0]).toMatchObject({ tool: 'web_search', ok: true });
+  });
+
+  it('a denied tool is reported as failed rather than dropped', () => {
+    const transport = new FakeTransport();
+    bindTransport(transport.asClient());
+
+    transport.emit('turn.accepted', { turn_id: 'trn_1', conversation_id: 'cnv_1' });
+    transport.emit('turn.tool_started', { tool: 'write_note' });
+    transport.emit('turn.tool_denied', { tool: 'write_note', reason: 'denied by the user' });
+
+    expect(useStore.getState().activeTurn?.tools[0]?.ok).toBe(false);
+  });
+
+  it('does nothing when there is no transport', () => {
+    const transport = new FakeTransport();
+    bindTransport(transport.asClient());
+    transport.emit('turn.accepted', { turn_id: 'trn_1', conversation_id: 'cnv_1' });
+    transport.emit('turn.approval_required', {
+      request_id: 'req_1', tool: 't', params: {}, prompt: 'p',
+    });
+
+    expect(() => useStore.getState().resolveApproval(true)).not.toThrow();
   });
 });
