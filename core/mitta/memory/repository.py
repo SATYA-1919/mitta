@@ -509,18 +509,49 @@ class MemoryRepository:
 
 _FTS_SPECIALS = str.maketrans(dict.fromkeys('"*():^-', " "))
 
+#: Dropped from queries. Not a linguistic stopword list — just the words that
+#: appear in almost every English question and therefore carry no signal about
+#: which memory is wanted. Retrieval is OR-based (see `_to_fts_query`), so
+#: leaving them in would let "what" alone match half the corpus.
+# fmt: off
+_NOISE_WORDS = frozenset({
+    "a", "am", "an", "and", "are", "as", "at", "be", "by", "can", "could",
+    "did", "do", "does", "for", "from", "had", "has", "have", "how", "i",
+    "if", "in", "is", "it", "its", "me", "my", "of", "on", "or", "should",
+    "that", "the", "their", "them", "then", "there", "these", "they", "this",
+    "to", "was", "were", "what", "when", "where", "which", "who", "whom",
+    "why", "will", "with", "would", "you", "your",
+})
+# fmt: on
+
 
 def _to_fts_query(raw: str) -> str | None:
     """Turn user input into a safe FTS5 MATCH expression.
 
-    Every term is quoted and the operators are stripped. Users type `C++` and
-    `error: -1` into search boxes, and FTS5 reads those as syntax; quoting turns
-    them back into what the user meant. The cost is that FTS5's own operators
-    are unavailable, which is the right trade for a search box aimed at people
-    rather than at query authors.
+    Two things are happening here, and the second was a bug worth recording.
+
+    **Quoting.** Every term is quoted and FTS5's operators are stripped. Users
+    type `C++` and `error: -1` into search boxes, and FTS5 reads those as
+    syntax; quoting turns them back into what the user meant.
+
+    **OR, not AND.** FTS5 treats space-separated terms as an implicit `AND`, so
+    a natural-language query required *every* word to be present. Asking "what
+    am I building?" found nothing, because no memory contains "am". Almost
+    nothing ever matched, and the failure was silent — an empty result set looks
+    identical to having no relevant memory.
+
+    OR is correct here because ranking is not this function's job: BM25 orders
+    by term rarity, RRF fuses that with the vector leg (DEC-051), and the
+    re-ranker takes it from there. Common words are dropped first so a query
+    does not match half the corpus on "the".
     """
     cleaned = raw.translate(_FTS_SPECIALS)
     terms = [term for term in cleaned.split() if term.strip()]
-    if not terms:
+
+    # Keep rare words; fall back to everything if the query was *only* noise,
+    # since matching weakly beats refusing to search.
+    meaningful = [t for t in terms if t.lower() not in _NOISE_WORDS and len(t) > 1]
+    chosen = meaningful or terms
+    if not chosen:
         return None
-    return " ".join(f'"{term}"' for term in terms)
+    return " OR ".join(f'"{term}"' for term in chosen)

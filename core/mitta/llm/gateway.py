@@ -14,7 +14,7 @@ so half of all requests fail while the system reports itself healthy.
 from __future__ import annotations
 
 import time
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Callable, Sequence
 from dataclasses import dataclass
 
 from mitta.errors import (
@@ -172,8 +172,19 @@ class LLMGateway:
 
         raise self._exhausted_error(attempts)
 
-    async def stream(self, request: ChatRequest) -> AsyncIterator[ChatChunk]:
+    async def stream(
+        self,
+        request: ChatRequest,
+        *,
+        on_selected: Callable[[ModelDescriptor], None] | None = None,
+    ) -> AsyncIterator[ChatChunk]:
         """Stream a completion, failing over **before** the first token only.
+
+        `on_selected` fires with the model that actually served the reply. A
+        callback rather than a field on the gateway, because two turns can
+        stream concurrently and shared mutable state would attribute one turn's
+        answer to the other's provider — a wrong entry in an audit record that
+        exists precisely to be trusted.
 
         Once text has been delivered, a mid-stream failure is not retried
         against another provider: doing so would restart the reply from the
@@ -190,6 +201,11 @@ class LLMGateway:
             delivered = False
             try:
                 async for chunk in provider.stream(request, model):
+                    if not delivered and on_selected is not None:
+                        # Fired on the first chunk, not before the attempt: a
+                        # provider that fails on connect never served anything
+                        # and must not be recorded as having answered.
+                        on_selected(model)
                     delivered = True
                     yield chunk
             except ProviderAuthError as exc:

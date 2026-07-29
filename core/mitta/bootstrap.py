@@ -25,6 +25,7 @@ from typing import Any
 
 from fastapi import FastAPI
 
+from mitta.agent.orchestrator import Orchestrator
 from mitta.api.app import create_app
 from mitta.config.paths import Paths, resolve_paths
 from mitta.config.settings import Settings, load_settings
@@ -63,6 +64,7 @@ class Runtime:
     indexer: Indexer
     gateway: LLMGateway
     conversations: ConversationRepository
+    orchestrator: Orchestrator
     app: FastAPI
 
     def shutdown(self) -> None:
@@ -152,6 +154,8 @@ def build_runtime(
         },
     )
 
+    orchestrator = Orchestrator(conversations, memory, gateway)
+
     app = create_app(
         settings=settings,
         paths=paths,
@@ -162,6 +166,7 @@ def build_runtime(
         embedder=embedder,
         gateway=gateway,
         conversations=conversations,
+        orchestrator=orchestrator,
     )
 
     return Runtime(
@@ -174,6 +179,7 @@ def build_runtime(
         indexer=indexer,
         gateway=gateway,
         conversations=conversations,
+        orchestrator=orchestrator,
         app=app,
     )
 

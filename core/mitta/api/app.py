@@ -15,6 +15,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from mitta.agent.orchestrator import Orchestrator
 from mitta.api.auth import TokenVerifier
 from mitta.api.exception_handlers import register_exception_handlers
 from mitta.api.http import (
@@ -24,6 +25,7 @@ from mitta.api.http import (
     system_router,
 )
 from mitta.api.middleware import RequestContextMiddleware
+from mitta.api.ws import router as ws_router
 from mitta.config.paths import Paths
 from mitta.config.settings import Settings
 from mitta.conversations.repository import ConversationRepository
@@ -51,6 +53,7 @@ def create_app(
     embedder: EmbeddingProvider | None = None,
     gateway: LLMGateway | None = None,
     conversations: ConversationRepository | None = None,
+    orchestrator: Orchestrator | None = None,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -90,6 +93,7 @@ def create_app(
     app.state.embedder = embedder
     app.state.gateway = gateway
     app.state.conversations = conversations
+    app.state.orchestrator = orchestrator
     app.state.api_version = API_VERSION
     app.state.started_at = time.monotonic()
     app.state.token_verifier = TokenVerifier(
@@ -148,5 +152,8 @@ def create_app(
         app.include_router(providers_router)
     if conversations is not None:
         app.include_router(conversations_router)
+    # Always mounted: the socket authenticates and reports agent unavailability
+    # itself, and a client that cannot connect at all has no way to be told why.
+    app.include_router(ws_router)
 
     return app

@@ -22,7 +22,7 @@ from fastapi import Depends, Request, WebSocket
 
 from mitta.errors import AuthError, ForbiddenOriginError, MissingTokenError
 
-_SUBPROTOCOL = "mitta.v1"
+SUBPROTOCOL = "mitta.v1"
 
 
 class TokenVerifier:
@@ -94,7 +94,7 @@ class TokenVerifier:
         if not header:
             return None
         parts = [p.strip() for p in header.split(",")]
-        if len(parts) < 2 or parts[0] != _SUBPROTOCOL:
+        if len(parts) < 2 or parts[0] != SUBPROTOCOL:
             return None
         return parts[1] or None
 

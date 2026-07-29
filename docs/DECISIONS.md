@@ -1621,3 +1621,105 @@ conversation.
 An endpoint that persists a user message with nothing to answer it would be
 worse than its absence — it would look like chat and never reply. A test asserts
 against the live route table that no `POST` exists on the messages path.
+
+
+---
+---
+
+# Phase 7b — Agent
+
+---
+
+## DEC-070 — FTS5 queries are OR, not AND
+
+**The bug.** MITTA answered "I don't have any information about what you are
+building" while a memory saying exactly that sat one row away, indexed and
+active. Context assembly reported `memories=0`.
+
+FTS5 treats space-separated terms as an implicit **AND**. `_to_fts_query`
+quoted each term and joined them with spaces, so "What am I building? One short
+sentence." required every one of those words to be present. No memory contains
+"am". Almost nothing ever matched.
+
+The failure was silent, which is what makes it serious: an empty result set is
+indistinguishable from having no relevant memory. Every unit test passed —
+they used queries whose terms all appeared in the target — and the defect only
+surfaced when a person asked a question the way people actually do.
+
+**Decision.** Join with `OR`, and drop words that appear in nearly every English
+question first.
+
+**Why OR is correct rather than a workaround.** Ranking is not this function's
+job. BM25 already orders by term rarity, RRF fuses that against the vector leg,
+and the re-ranker applies recency and importance (DEC-051). AND was making a
+*recall* decision inside a component whose only job is candidate generation.
+
+The noise-word list exists because OR without it lets "the" match the corpus. A
+query consisting only of noise falls back to using every term — matching weakly
+beats refusing to search.
+
+**Verified where it matters:** "What am I building?" now recalls 1 memory and
+answers correctly; "What is my cat called?" recalls 2 and answers "Mochi".
+
+---
+
+## DEC-071 — Context assembly drops memories before history
+
+**Decision.** When the budget is exceeded, the order is: lowest-ranked memories
+first, then oldest history. The system prompt and the current user message are
+never dropped.
+
+**Why not the intuitive order.** Dropping history first feels right — memories
+are "the important stuff". It is wrong. A conversation missing its middle reads
+as the assistant losing the thread, which users notice within one exchange,
+while a missing low-ranked memory is invisible. The retriever has already
+ordered memories by usefulness, so the tail is what it was least confident
+about.
+
+35% of the window is reserved for the reply. Filling the context to the brim
+produces a truncated answer, and a sentence stopping mid-word is a worse failure
+than dropping an old message.
+
+**What was sent is emitted as a `turn.context` frame** — the memory ids used and
+the ones dropped for budget. R5's enforcement clause says anything the user
+cannot inspect they cannot trust, and this is the chokepoint through which
+everything reaches a third party. It also gives "why didn't it remember X" an
+answer that is not a shrug.
+
+---
+
+## DEC-072 — Provider attribution is a callback, not shared state
+
+**Problem.** The turn record needs to say which provider and model answered.
+`stream()` yields text chunks and has nowhere to put it.
+
+**First attempt.** Read it back from gateway health after the stream finished —
+which guesses, and returns the first healthy provider rather than the one that
+actually answered.
+
+**Decision.** `stream(request, on_selected=...)`, fired on the first chunk of
+whichever provider succeeds.
+
+**Why a callback rather than a field on the gateway.** Two turns can stream
+concurrently. Shared mutable state would attribute one turn's answer to the
+other's provider — a wrong entry in an audit record that exists precisely to be
+trusted. Firing on the first chunk rather than at selection matters too: a
+provider that fails on connect never served anything and must not be recorded
+as having answered.
+
+---
+
+## DEC-073 — Retrieval during a turn does not count as access
+
+**Decision.** `Orchestrator._build_context` calls `recall(..., touch=False)`.
+
+**Why.** The access count feeds retention (DEC-053): memories that keep proving
+useful stop decaying. But retrieval is not use. Six memories are fetched per
+turn and the model may ignore all of them — counting those as uses would keep
+whatever the retriever happens to favour alive indefinitely, which is a feedback
+loop that entrenches early mistakes.
+
+Recording access properly needs attribution — knowing which memory actually
+contributed to an answer — and nothing in the current pipeline can establish
+that. Under-counting is the safe direction: it makes memories decay slightly
+faster than ideal, and decay only demotes.

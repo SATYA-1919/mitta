@@ -111,9 +111,7 @@ class TestMessages:
             "three",
         ]
 
-    def test_pagination_returns_the_tail_first(
-        self, conversations: ConversationRepository
-    ) -> None:
+    def test_pagination_returns_the_tail_first(self, conversations: ConversationRepository) -> None:
         # A long thread should load what the user is looking at, then earlier
         # pages as they scroll up.
         conversation = conversations.create(ConversationDraft())
@@ -191,9 +189,7 @@ class TestMessages:
 
 
 class TestTurns:
-    def test_a_turn_records_its_accounting(
-        self, conversations: ConversationRepository
-    ) -> None:
+    def test_a_turn_records_its_accounting(self, conversations: ConversationRepository) -> None:
         conversation = conversations.create(ConversationDraft())
         turn = conversations.begin_turn(conversation.id, input_kind=InputKind.PALETTE, now=NOW)
 
@@ -215,9 +211,7 @@ class TestTurns:
         assert finished.register is Register.SERIOUS
         assert finished.duration_ms == 5000
 
-    def test_a_failed_turn_keeps_its_error(
-        self, conversations: ConversationRepository
-    ) -> None:
+    def test_a_failed_turn_keeps_its_error(self, conversations: ConversationRepository) -> None:
         conversation = conversations.create(ConversationDraft())
         turn = conversations.begin_turn(conversation.id)
 
@@ -255,9 +249,7 @@ class TestTurns:
         assert conversations.reconcile_orphaned_turns() == 0
         assert conversations.get_turn(turn.id).status is TurnStatus.COMPLETED
 
-    def test_messages_can_be_grouped_by_turn(
-        self, conversations: ConversationRepository
-    ) -> None:
+    def test_messages_can_be_grouped_by_turn(self, conversations: ConversationRepository) -> None:
         conversation = conversations.create(ConversationDraft())
         turn = conversations.begin_turn(conversation.id)
         conversations.add_message(conversation.id, user("in the turn", turn_id=turn.id))
@@ -311,9 +303,9 @@ class TestApi:
     def test_archive_is_reversible_and_delete_is_not(
         self, client: TestClient, auth_headers: dict[str, str]
     ) -> None:
-        conversation_id = client.post(
-            "/v1/conversations", json={}, headers=auth_headers
-        ).json()["id"]
+        conversation_id = client.post("/v1/conversations", json={}, headers=auth_headers).json()[
+            "id"
+        ]
 
         archived = client.post(
             f"/v1/conversations/{conversation_id}/archive", headers=auth_headers

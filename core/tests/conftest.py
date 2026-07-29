@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from mitta.agent.orchestrator import Orchestrator
 from mitta.api.app import create_app
 from mitta.config.paths import Paths
 from mitta.config.settings import DatabaseSettings, Settings
@@ -96,6 +97,7 @@ def client(
     embedder: DeterministicEmbedder,
     gateway: LLMGateway,
     conversations: ConversationRepository,
+    orchestrator: Orchestrator,
 ) -> Iterator[TestClient]:
     app = create_app(
         settings=settings,
@@ -111,6 +113,7 @@ def client(
         embedder=embedder,
         gateway=gateway,
         conversations=conversations,
+        orchestrator=orchestrator,
     )
     with TestClient(app) as test_client:
         yield test_client
@@ -188,3 +191,14 @@ def gateway() -> LLMGateway:
 @pytest.fixture
 def conversations(migrated: Database) -> ConversationRepository:
     return ConversationRepository(migrated)
+
+
+@pytest.fixture
+def orchestrator(
+    conversations: ConversationRepository,
+    memory_service: MemoryService,
+    gateway: LLMGateway,
+) -> Orchestrator:
+    """Built on the keyless gateway, so a turn fails at the provider rather than
+    making a real call. Streaming behaviour is covered against fakes."""
+    return Orchestrator(conversations, memory_service, gateway)

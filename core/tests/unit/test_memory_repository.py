@@ -289,3 +289,32 @@ class TestIndexerSupport:
 
     def test_forget_seqs_of_nothing_is_a_no_op(self, repository: MemoryRepository) -> None:
         assert repository.forget_seqs([]) == 0
+
+    def test_a_natural_language_question_matches(self, repository: MemoryRepository) -> None:
+        """FTS5 implicitly ANDs space-separated terms.
+
+        That made "what am I building?" find nothing, because no memory contains
+        the word "am" — and the failure was silent, since an empty result set is
+        indistinguishable from having no relevant memory.
+        """
+        repository.add(draft("Satya is building MITTA, an AI desktop companion"))
+
+        assert repository.search_keyword("What am I building? One short sentence.") != []
+
+    def test_noise_words_do_not_drag_in_unrelated_memories(
+        self, repository: MemoryRepository
+    ) -> None:
+        # The cost of OR semantics, paid for by dropping words that appear in
+        # almost every English question. Without that, "is" alone would match
+        # both rows and the query would return the whole corpus.
+        repository.add(draft("the deployment pipeline is flaky"))
+        repository.add(draft("mochi is my cat"))
+
+        assert len(repository.search_keyword("what is the deployment")) == 1
+
+    def test_a_query_of_only_common_words_still_searches(
+        self, repository: MemoryRepository
+    ) -> None:
+        # Matching weakly beats refusing to search at all.
+        repository.add(draft("what"))
+        assert repository.search_keyword("what") != []
