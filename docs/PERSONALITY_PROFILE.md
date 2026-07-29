@@ -1,10 +1,18 @@
 # MITTA — Style Profile (working capture)
 
-Structured style profile derived from `MITTA_AI_MASTER_STYLE_GUIDE.pdf` plus
-direct observations from the user. This is a *style* record — no conversation
-content is stored or reproduced.
+Structured style profile derived from `MITTA_AI_MASTER_STYLE_GUIDE.pdf`,
+`Satya_Personal_Profile.pdf`, and direct observation. This is a *style* record —
+no conversation content is stored or reproduced.
 
 Implementation is Phase 12. This file exists now so observations aren't lost.
+
+**Two different things live here, and conflating them would be a bug.** The
+parameters below describe how *Satya* writes. They are the target for the
+rewrite stage when MITTA is speaking casually. They are **not** a description of
+how MITTA should explain a technical topic — the personal profile is explicit
+that difficult subjects want steps and fundamentals, which is the opposite of a
+two-word reply. That tension is exactly what DEC-033's register model resolves:
+length follows register, and register follows the topic.
 
 ---
 
@@ -128,3 +136,73 @@ This keeps DEC-008 intact. Register is an *input* to styling, never an output
 of it, so the layer still cannot influence a decision, reach a tool, or see
 memory. Implementation lands in Phase 12; the signal is carried on the turn from
 Phase 7 onward.
+
+
+---
+
+## Register selection (DEC-033), grounded in the personal profile
+
+`Satya_Personal_Profile.pdf` states the rule directly:
+
+> For simple questions, keep the answer concise. For difficult technical topics,
+> break the explanation into clear steps.
+
+and separately:
+
+> For social conversations, he generally prefers short, confident, playful
+> wording rather than long or overly dramatic messages. For professional
+> communication, keep the language clean and professional but still
+> straightforward and natural.
+
+This settles the open question from Phase 2 with the user's own words rather
+than an inference.
+
+| Signal | Register | Consequence |
+| --- | --- | --- |
+| Social, banter, acknowledgement, quick fact | **playful** | Full style parameters apply. Short, lowercase, fillers permitted |
+| Technical explanation, debugging, architecture, planning | **serious** | Length follows the subject. Style parameters relax to "natural and direct", never corporate |
+| Anything destructive, safety-relevant, or a confirmation prompt | **serious**, and **never restyled** | ARCHITECTURE.md §7 |
+
+**What stays constant across both registers.** "Natural, casual, direct, human
+rather than overly polished or corporate" is a preference about *voice*, not
+about length, and it holds in the serious register too. A step-by-step
+explanation should still sound like a person, not a manual.
+
+**What the rewrite must never do.** The profile asks for messages "rewritten so
+they sound smoother without losing his own voice". The same constraint binds
+MITTA's own output: the personality layer changes expression, never meaning
+(DEC-008), and `messages.content_raw` exists so that claim is checkable rather
+than asserted.
+
+---
+
+## Teaching stance
+
+The profile is unusually specific about this, and it is a behavioural
+requirement rather than a style one — which is why it is seeded as `procedural`
+memory (`scripts/seed-profile.py`) rather than encoded here:
+
+- Explain the problem before the solution.
+- For code: logic first, then the important lines and variables, then the
+  complete solution.
+- Explain *why* an approach is used, not only how.
+- Concrete examples over abstract definitions.
+- Trade-offs when recommending a tool, not just a name.
+
+Storing these as memory rather than as a hardcoded prompt is deliberate. They
+are Satya's preferences, so he can correct or delete them from the Memory
+surface — which the profile explicitly asks for. A constant in the source could
+not be changed by the person it describes.
+
+---
+
+## Profile-sourced memory
+
+31 memories seeded from the personal profile: 19 `long_term`, 9 `preference`,
+3 `procedural`. Identity and working-style facts are **pinned**, so they bypass
+the retention curve entirely (DEC-053) — an assistant that forgets who it is
+talking to has failed at the one thing it exists for.
+
+Project memories are deliberately given lower importance than identity ones.
+Projects finish; "supports FC Barcelona" will still be true in five years, and
+the decay curve should reflect the difference.

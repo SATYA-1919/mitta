@@ -11,7 +11,7 @@ SHELL_DIR := apps/desktop/src-tauri
 CARGO   ?= $(HOME)/.cargo/bin/cargo
 
 .DEFAULT_GOAL := help
-.PHONY: help venv install install-ui secrets install-hooks set-key-groq set-key-openrouter check-models test test-unit test-integration lint typecheck arch \
+.PHONY: help venv install install-ui secrets install-hooks set-key-groq set-key-openrouter check-models seed-profile test test-unit test-integration lint typecheck arch \
         check check-ui check-all run clean \
         dev dev-real ui-dev ui-build ui-test ui-typecheck ui-budget gen-types download-model \
         shell-build shell-test shell-lint shell-run check-shell
@@ -55,6 +55,9 @@ set-key-groq:  ## Paste your Groq key into .env (hidden input, no shell history)
 
 set-key-openrouter:  ## Paste your OpenRouter key into .env
 	./scripts/set-key.sh openrouter
+
+seed-profile:  ## Load Satya's context profile into memory (idempotent)
+	$(PY) scripts/seed-profile.py
 
 check-models:  ## Verify hardcoded model ids still exist upstream
 	$(PY) scripts/check-models.py
