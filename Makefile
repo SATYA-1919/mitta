@@ -14,7 +14,7 @@ CARGO   ?= $(HOME)/.cargo/bin/cargo
 .PHONY: help venv install install-ui secrets install-hooks set-key-groq set-key-openrouter check-models seed-profile test test-unit test-integration lint typecheck arch \
         check check-ui check-all run clean \
         dev dev-real ui-dev ui-build ui-test ui-typecheck ui-budget gen-types download-model \
-        shell-build shell-test shell-lint shell-run check-shell
+        shell-build shell-test shell-lint shell-run app app-release check-shell
 
 help:  ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -119,8 +119,13 @@ shell-lint:  ## rustfmt --check and clippy, warnings denied
 	cd $(SHELL_DIR) && $(CARGO) fmt --check
 	cd $(SHELL_DIR) && $(CARGO) clippy --all-targets -- -D warnings
 
-shell-run: ui-build  ## Run the desktop app (builds the frontend first)
-	cd $(SHELL_DIR) && $(CARGO) run
+app:  ## Run MITTA as a desktop app (starts the dev server first)
+	./scripts/app.sh
+
+app-release:  ## Build and run the standalone app (slow first compile)
+	./scripts/app.sh --release
+
+shell-run: app  ## Alias for `make app`
 
 check-shell: shell-lint shell-test  ## Shell: everything CI runs
 

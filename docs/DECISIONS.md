@@ -2138,3 +2138,34 @@ rather than a click made to clear a dialog.
 were recorded; the token is minted from those. A client returning altered
 arguments gets a token that fails verification against the ones actually used —
 so a compromised webview cannot widen an approval it was granted.
+
+
+---
+
+## DEC-089 — `make app` starts the dev server before the window
+
+**The bug.** `make shell-run` built the frontend, then ran `cargo run`. The
+window opened completely blank — white, no error, nothing in the log.
+
+A debug build embeds `devUrl` from `tauri.conf.json` at compile time, so the
+webview requested `http://127.0.0.1:1420` and got a connection refused. The
+frontend build that `shell-run` had just produced was never consulted: only a
+**release** build embeds `frontendDist`.
+
+Nothing failed loudly. The Rust side logged a clean startup, the sidecar started
+correctly and reported 36 memories, and the window rendered an empty document.
+Every component was working and the product was unusable.
+
+**Decision.** `scripts/app.sh` starts Vite, waits for it to answer, then runs
+the app — which is what `tauri dev` does and what the Makefile target was
+pretending to do. `--release` takes the other path: build the frontend, embed
+it, and run standalone with no server.
+
+**Why not just always build release.** The first release compile takes minutes
+(`lto`, one codegen unit, `opt-level = "s"`), and hot-reloading the UI is worth
+having while surfaces are still being built.
+
+The general shape of this mistake is worth naming: a target whose name promised
+one thing (*"Run the desktop app"*) and whose body did another, with no step
+that could fail. `ui-build` succeeded, `cargo run` succeeded, and the result was
+wrong. A build that cannot fail is not the same as a build that works.
