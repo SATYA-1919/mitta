@@ -2277,3 +2277,48 @@ avoid. A break reports the `seq` where it starts.
 **There is no endpoint that deletes from the audit log**, and a test asserts it
 against the live route table. A log the subject of the log can quietly edit is
 not an audit trail.
+
+
+---
+
+## DEC-094 — Two CSPs, and the stricter one wins
+
+**The bug, and it is the second time this exact symptom appeared.** The app
+showed **Disconnected** with a healthy Rust side, a running sidecar, and both
+providers configured — after DEC-091 had already fixed a different cause of the
+same message.
+
+`index.html` carries its own CSP meta tag, and `tauri.conf.json` carries a
+`csp` field. **Both are applied, and the stricter of the two wins.** The config
+correctly listed `ipc:` and `http://ipc.localhost`; the meta tag did not. Every
+IPC call was blocked by a policy that looked right in the file people check.
+
+**Decision.** Both HTML entry points now list the IPC origins, with a comment
+saying why they must stay in step. The comment matters more than the fix: the
+config file is where anyone would look, and it was already correct.
+
+**Also.** `connection.ts` now distinguishes the three reasons this fails —
+shell present but IPC blocked, browser without dev env vars, or something else —
+and shows the reason in the standby panel. "Disconnected" alone sent debugging
+to the wrong place twice, which is one time more than a symptom should be
+allowed to do that.
+
+---
+
+## DEC-095 — The idle view is the one that decides how the app reads
+
+**Problem.** The HUD treatment was applied and the app still looked like a dark
+window with two sentences in it. The reason is that the empty chat view is what
+a user sees *before typing*, which is most of the time they are looking at it,
+and it had no HUD in it at all.
+
+**Decision.** A standby panel: framed, bracketed, with a live readout of link
+state, memory count, index size and whether recall is semantic or degraded.
+
+**Every value in it is real.** A mock telemetry panel would look exactly right
+and be a lie on the first surface the user meets — which is a bad place to
+establish that the readouts cannot be trusted.
+
+The grid opacity went from 4% to 9% and the label colour picked up the accent.
+At 4% the grid was invisible on an OLED panel, which is to say it was costing
+render time and delivering nothing.

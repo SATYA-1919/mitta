@@ -9,9 +9,10 @@
 
 import { useEffect, useRef } from 'react';
 
-import { ActivityRing, HudPanel } from '@/components/ui/hud';
-import { Button, cx, EmptyState, Kbd, StatusDot } from '@/components/ui/primitives';
+import { ActivityRing, HudPanel, HudRule } from '@/components/ui/hud';
+import { Button, cx, Kbd, StatusDot } from '@/components/ui/primitives';
 import type { Message } from '@/lib/api/client';
+import { useMemoryStore } from '@/state/memory';
 import { displayText, type PendingApproval, useStore } from '@/state/store';
 
 export function ChatSurface() {
@@ -32,10 +33,7 @@ export function ChatSurface() {
     <div className="flex h-full min-h-0 flex-col">
       <div className="scrollable grid-surface min-h-0 flex-1">
         {empty ? (
-          <EmptyState
-            title="Ask MITTA anything"
-            hint="It remembers what you tell it, and shows you what it used"
-          />
+          <StandbyPanel />
         ) : (
           <div className="mx-auto max-w-3xl space-y-5 p-6">
             {messages.map((message) => (
@@ -52,6 +50,89 @@ export function ChatSurface() {
       )}
 
       <Composer disabled={connection !== 'open'} draftLength={draft.length} />
+    </div>
+  );
+}
+
+/**
+ * The idle view.
+ *
+ * An empty chat is the state the user sees most often before typing, so it is
+ * the one that decides whether the app reads as an instrument. Two sentences on
+ * a grid read as a placeholder; a standby readout reads as something running
+ * and waiting.
+ *
+ * Every value here is real. A fake telemetry panel would look the part and be a
+ * lie on the first surface the user meets.
+ */
+function StandbyPanel() {
+  const stats = useMemoryStore((s) => s.stats);
+  const connection = useStore((s) => s.connection);
+  const detail = useStore((s) => s.connectionDetail);
+  const online = connection === 'open';
+
+  return (
+    <div className="flex h-full items-center justify-center p-8">
+      <HudPanel
+        label="standby"
+        active={online}
+        className="w-full max-w-md"
+        right={<ActivityRing active={online} size={14} />}
+      >
+        <div className="space-y-3">
+          <div>
+            <p className="text-sm text-fg-primary">Ask MITTA anything</p>
+            <p className="mt-0.5 text-2xs text-fg-muted">
+              It remembers what you tell it, and shows you what it used
+            </p>
+          </div>
+
+          <HudRule />
+
+          <dl className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-2xs">
+            <Stat label="link" value={connection} tone={online ? 'ok' : 'error'} />
+            <Stat
+              label="memory"
+              value={stats === null ? '—' : `${stats.active} stored`}
+              tone={stats === null ? 'idle' : 'ok'}
+            />
+            <Stat
+              label="index"
+              value={stats === null ? '—' : `${stats.vectors_indexed} vectors`}
+              tone={stats?.index_consistent === false ? 'warn' : 'ok'}
+            />
+            <Stat
+              label="recall"
+              value={stats === null ? '—' : stats.embedding_degraded ? 'degraded' : 'semantic'}
+              tone={stats?.embedding_degraded === true ? 'warn' : 'ok'}
+            />
+          </dl>
+
+          {/* The reason, not just the state. "Disconnected" alone sent
+              debugging to the wrong place twice. */}
+          {!online && detail !== null && (
+            <p className="border-l-2 border-danger/60 pl-2 text-2xs text-danger">{detail}</p>
+          )}
+        </div>
+      </HudPanel>
+    </div>
+  );
+}
+
+function Stat({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string;
+  tone: 'ok' | 'warn' | 'error' | 'idle';
+}) {
+  return (
+    <div className="flex items-center gap-1.5">
+      <StatusDot tone={tone} />
+      <dt className="label !text-[0.58rem]">{label}</dt>
+      <dd className="readout ml-auto text-fg-secondary">{value}</dd>
     </div>
   );
 }

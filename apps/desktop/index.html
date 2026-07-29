@@ -8,10 +8,16 @@
       No remote origins. The shell loads only what it ships with; a CDN link here
       would be a network dependency on first paint and a hole in the local-first
       claim (R5).
+
+      `ipc:` and `http://ipc.localhost` are how Tauri's IPC reaches Rust. This
+      meta tag and the `csp` in tauri.conf.json are BOTH applied, and the
+      stricter wins — so omitting them here silently blocked every IPC call
+      while the config looked correct. The app reported "Disconnected" with a
+      perfectly healthy Rust side behind it.
     -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; connect-src 'self' http://127.0.0.1:* ws://127.0.0.1:*; img-src 'self' data: asset:; style-src 'self' 'unsafe-inline'"
+      content="default-src 'self'; connect-src 'self' ipc: http://ipc.localhost http://127.0.0.1:* ws://127.0.0.1:*; img-src 'self' data: asset:; style-src 'self' 'unsafe-inline'"
     />
     <title>MITTA</title>
   </head>

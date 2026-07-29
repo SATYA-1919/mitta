@@ -18,12 +18,6 @@ import type { ReactNode } from 'react';
 
 import { cx } from '@/components/ui/primitives';
 
-/** Cut corners, drawn with a clip-path so there are no extra DOM nodes. */
-const CLIP = {
-  clipPath:
-    'polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px)',
-} as const;
-
 export function HudPanel({
   label,
   right,
@@ -39,28 +33,25 @@ export function HudPanel({
 }) {
   return (
     <section
-      style={CLIP}
       className={cx(
-        'relative border bg-surface-raised/50',
-        // The border carries the glow. `box-shadow` on a 1px cyan line is the
+        // The frame carries the glow. `box-shadow` on a 1px cyan line is the
         // whole effect; the same shadow on the panel body would wash the
         // content sitting on it.
-        active
-          ? 'border-accent/70 shadow-[0_0_12px_-2px_var(--color-accent)]'
-          : 'border-border-default/80',
+        'hud-frame hud-ticks relative overflow-hidden bg-surface-raised/40',
+        active && 'border-accent/70 shadow-[0_0_22px_-6px_var(--color-accent)]',
         className,
       )}
     >
       {(label !== undefined || right !== undefined) && (
-        <header className="flex items-center gap-2 border-b border-border-subtle/70 px-3 py-1.5">
+        <header className="flex items-center gap-2 border-b border-accent/20 bg-accent/[0.04] px-3 py-1.5 pl-4">
           {label !== undefined && <span className="label">{label}</span>}
           {/* Connector rule. A label that runs into a hairline reads as a
               schematic; the same label alone reads as a heading. */}
-          <span className="h-px flex-1 bg-gradient-to-r from-accent/30 to-transparent" />
+          <span className="h-px flex-1 bg-gradient-to-r from-accent/50 to-transparent" />
           {right}
         </header>
       )}
-      <div className="p-3">{children}</div>
+      <div className="p-3 pl-4">{children}</div>
     </section>
   );
 }

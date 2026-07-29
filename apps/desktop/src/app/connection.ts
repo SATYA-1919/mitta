@@ -9,7 +9,12 @@
  */
 
 import { ApiClient } from '@/lib/api/client';
-import { getRuntimeInfo, onMetrics, ShellUnavailableError } from '@/lib/ipc/tauri';
+import {
+  getRuntimeInfo,
+  isTauriAvailable,
+  onMetrics,
+  ShellUnavailableError,
+} from '@/lib/ipc/tauri';
 import { TransportClient } from '@/lib/transport/socket';
 import { useMemoryStore } from '@/state/memory';
 import { bindTransport } from '@/state/sync';
@@ -28,9 +33,13 @@ export async function connect(): Promise<Connection | null> {
   try {
     runtime = await getRuntimeInfo();
   } catch (error) {
-    const detail =
-      error instanceof ShellUnavailableError
-        ? 'Tauri shell not available (Phase 4b)'
+    // Distinguish the three reasons this fails, because they need different
+    // fixes and "Disconnected" sent debugging to the wrong place twice.
+    const inShell = isTauriAvailable();
+    const detail = inShell
+      ? `Shell present but IPC failed — check the CSP allows ipc: (${String(error)})`
+      : error instanceof ShellUnavailableError
+        ? 'Running in a browser without VITE_MITTA_* — use `make dev`, or `make app` for the desktop window'
         : String(error);
     store.setConnection('closed', detail);
     return null;
