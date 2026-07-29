@@ -14,6 +14,7 @@ diagnosis.
 from __future__ import annotations
 
 import json
+import re
 import time
 from collections.abc import AsyncIterator, Sequence
 from typing import Any
@@ -122,6 +123,25 @@ class OpenAICompatibleProvider:
             raise ProviderUnavailableError(
                 f"{self._name} is unreachable: {exc}", details={"provider": self._name}
             ) from exc
+
+        recovered = _recover_tool_call(response)
+        if recovered is not None:
+            log.info(
+                "provider.tool_call_recovered",
+                extra={
+                    "provider": self._name,
+                    "model_id": model.id,
+                    "tool": recovered[0]["function"]["name"],
+                },
+            )
+            return ChatResult(
+                text="",
+                model=model,
+                usage=Usage(),
+                latency_ms=int((time.monotonic() - started) * 1000),
+                finish_reason="tool_calls",
+                tool_calls=recovered,
+            )
 
         self._raise_for_status(response)
         body = response.json()
@@ -260,3 +280,68 @@ def parse_sse_line(line: str) -> ChatChunk | None:
         tool_calls=delta.get("tool_calls"),
         finish_reason=choice.get("finish_reason"),
     )
+
+
+#: The legacy pseudo-XML tool call some Llama builds emit instead of JSON:
+#:
+#:     <function=open_url{"url": "youtube"}</function>
+#:
+#: Groq's server rejects it with a 400 and hands the raw text back in
+#: `error.failed_generation`.
+_LEGACY_CALL = re.compile(r"<function=([A-Za-z0-9_.-]{1,64})\s*(\{.*?\})\s*</function>", re.DOTALL)
+
+
+def _recover_tool_call(response: httpx.Response) -> list[dict[str, Any]] | None:
+    """Rescue a tool call the provider rejected for its own formatting.
+
+    `llama-3.3-70b` on Groq intermittently emits its old `<function=...>` form
+    rather than JSON `tool_calls`, and Groq answers its own model with:
+
+        400 — Failed to call a function. Please adjust your prompt.
+              failed_generation: <function=open_url{"url": "youtube"}</function>
+
+    The model chose correctly. Only the transport disagreed, and it enclosed
+    the intended call in the error. Discarding that and failing over costs a
+    round-trip to reach a model that, when observed, returned no call *and* no
+    text — so the user's "open youtube" did nothing at all, with no error.
+
+    This is deliberately narrow: one known format, from an error body, parsed
+    strictly, with the arguments re-encoded as JSON so the shape handed to the
+    rest of the system is the ordinary one. Anything that does not match
+    exactly falls through to the normal error path.
+
+    Returns `None` when there is nothing to recover.
+    """
+    if response.status_code != 400:
+        return None
+
+    try:
+        error = response.json().get("error")
+    except (json.JSONDecodeError, AttributeError):
+        return None
+    if not isinstance(error, dict):
+        return None
+
+    generation = error.get("failed_generation")
+    if not isinstance(generation, str):
+        return None
+
+    calls: list[dict[str, Any]] = []
+    for index, match in enumerate(_LEGACY_CALL.finditer(generation)):
+        name, raw_arguments = match.group(1), match.group(2)
+        try:
+            arguments = json.loads(raw_arguments)
+        except json.JSONDecodeError:
+            # Malformed on both counts. Nothing reliable to recover.
+            return None
+        if not isinstance(arguments, dict):
+            return None
+        calls.append(
+            {
+                "id": f"recovered_{index}",
+                "type": "function",
+                "function": {"name": name, "arguments": json.dumps(arguments)},
+            }
+        )
+
+    return calls or None

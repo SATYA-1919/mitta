@@ -263,3 +263,48 @@ describe('tool approval', () => {
     expect(() => useStore.getState().resolveApproval(true)).not.toThrow();
   });
 });
+
+/**
+ * The Send button.
+ *
+ * Both cases here shipped broken together: a connection bootstrap that could
+ * detach a live transport, and a `send()` that reported nothing when it found
+ * one missing. The second is why the first survived a whole session — the
+ * button simply did nothing, with no message anywhere on screen.
+ */
+describe('sending', () => {
+  it('sends the draft and clears it', () => {
+    const transport = new FakeTransport();
+    useStore.getState().attachChat(null, transport.asClient());
+    useStore.getState().setDraft('mitta can u open YouTube');
+
+    expect(useStore.getState().send()).toBe(true);
+
+    expect(transport.sent).toEqual([
+      { type: 'turn.start', data: { text: 'mitta can u open YouTube' } },
+    ]);
+    expect(useStore.getState().draft).toBe('');
+    expect(useStore.getState().pendingText).toBe('mitta can u open YouTube');
+  });
+
+  it('says so when there is no transport rather than failing silently', () => {
+    useStore.getState().setDraft('hello');
+
+    expect(useStore.getState().send()).toBe(false);
+    expect(useStore.getState().chatError).not.toBeNull();
+    // The draft survives. Clearing it would lose what the user typed on a send
+    // that never happened.
+    expect(useStore.getState().draft).toBe('hello');
+  });
+
+  it('refuses a second turn while one is running', () => {
+    const transport = new FakeTransport();
+    useStore.getState().attachChat(null, transport.asClient());
+    transport.emit('turn.accepted', { turn_id: 'trn_1', conversation_id: 'cnv_1' });
+    useStore.getState().setDraft('again');
+
+    // No binding, so the frame above did not reach the store; drive it directly.
+    useStore.getState().beginTurn('trn_1', 'cnv_1');
+    expect(useStore.getState().send()).toBe(false);
+  });
+});

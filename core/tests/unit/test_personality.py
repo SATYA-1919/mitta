@@ -120,6 +120,46 @@ class TestGuards:
         # That is not a restyle, it is a different reply.
         assert verify("Done.", "Done. " + "Additionally, " * 40) != []
 
+    def test_swapping_the_user_for_mitta_is_rejected(self) -> None:
+        # Observed live. "your Mac" became "my mac", which reads as MITTA
+        # reporting on its own machine rather than on the user's.
+        violations = verify(
+            "Apple Music is now open on your Mac.",
+            "apple music is now open on my mac ra",
+        )
+
+        assert [v.reason for v in violations] == ["rewrite changed who the reply is about"]
+
+    def test_a_question_to_the_user_may_not_become_mitta_narrating(self) -> None:
+        # Also observed live, and worse: the first sentence — the actual answer
+        # — was deleted, and the question turned into MITTA stating its own
+        # intentions. Every length and span check passed this.
+        violations = verify(
+            "Apple Music is now open. Is there something specific you'd like to do "
+            "in Apple Music, like play a song or search for an artist?",
+            "there's something specific i'd like to do in apple music, like play a "
+            "song or search for an artist",
+        )
+
+        assert violations != []
+
+    def test_making_the_user_the_actor_is_rejected(self) -> None:
+        # The other direction, and the worse one: MITTA drops out of its own
+        # sentence and the user is told they are doing the thing.
+        violations = verify("I'm opening YouTube now.", "you're opening youtube now")
+
+        assert [v.reason for v in violations] == ["rewrite changed who the reply is about"]
+
+    def test_dropping_a_pronoun_is_still_allowed(self) -> None:
+        # The narrow rule earns its keep by not firing here: losing an "I" while
+        # the user stays the subject is an ordinary, correct restyle.
+        assert (
+            verify("I have opened Apple Music on your Mac.", "opened apple music on your mac") == []
+        )
+
+    def test_a_reply_about_nobody_is_unaffected(self) -> None:
+        assert verify("The index holds 40 vectors.", "index has 40 vectors ra") == []
+
     def test_gutting_a_long_reply_is_rejected(self) -> None:
         original = "The migration runs in three steps. " * 10
         assert verify(original, "done") != []

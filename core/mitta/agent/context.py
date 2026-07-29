@@ -17,11 +17,13 @@ the user's last sentence is the least surprising thing to keep.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 
 from mitta.conversations.models import Message, MessageRole
 from mitta.llm.models import ChatMessage, Role
 from mitta.memory.retrieval import RetrievalResult
+from mitta.tools.base import ToolSpec
 
 # Characters per token, English. Rough by design — the true count comes back
 # from the provider, and this only has to be good enough to avoid overflow.
@@ -41,9 +43,37 @@ Never claim to remember something that is not there.
 Be direct. Answer the question that was asked. If you do not know, say so.
 
 Never claim to have done something unless a tool result above shows it \
-succeeded. If you have no tool for what was asked, say you cannot do it yet. \
-Describing an action you did not take is worse than refusing, because the user \
-will believe it."""
+succeeded. Describing an action you did not take is worse than refusing, \
+because the user will believe it.
+
+When a tool result above shows an action succeeded, say plainly that you did \
+it — "opening it now", "done, it's open". Do not ask whether the user wants \
+it done; it already is. Do not follow it with a question unless they asked one."""
+
+#: Appended when the runtime knows which tools are wired.
+#:
+#: Added because MITTA denied a capability it had used a minute earlier. Asked
+#: to open YouTube it said "I cannot open YouTube yet", and asked why, it
+#: explained it was "a text-based assistant with no ability to open external
+#: applications" — immediately after opening Apple Music. The model was never
+#: told what it could do, so it fell back on what an assistant usually cannot.
+#:
+#: A capability list is not a licence to claim success: the rule above still
+#: stands, and the tool result is still the only evidence that anything ran.
+CAPABILITY_PREAMBLE = """What you can actually do on this Mac, right now:
+
+{capabilities}
+
+These are real and they work. Never tell the user you are text-only, that you \
+cannot open things, or that you have no way to act — you have the tools listed \
+above.
+
+But a capability is not an action. If no tool result appears above, nothing ran \
+this turn: do not say the action is done and do not say it is happening. Say \
+you can do it and that it did not go through this time.
+
+If a request genuinely needs something not on that list, name the specific \
+thing you are missing instead of describing yourself as incapable in general."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,6 +105,21 @@ _ROLE_MAP: dict[MessageRole, Role] = {
 }
 
 
+def capability_lines(specs: Iterable[ToolSpec]) -> str:
+    """One line per tool, for the capability preamble.
+
+    The tool's own description, trimmed to its first sentence. The full text is
+    written to help a model *choose* between tools and includes the boundaries
+    ("NOT for launching an application"), which is noise in a list whose job is
+    to tell the model what it has.
+    """
+    lines: list[str] = []
+    for spec in sorted(specs, key=lambda s: s.name):
+        summary = spec.description.split(". ")[0].rstrip(".")
+        lines.append(f"- {spec.name}: {summary}")
+    return "\n".join(lines)
+
+
 def assemble(
     *,
     user_input: str,
@@ -82,6 +127,7 @@ def assemble(
     memories: list[RetrievalResult],
     context_window: int,
     system_prompt: str = SYSTEM_PROMPT,
+    capabilities: str = "",
 ) -> AssembledContext:
     """Build the message list for one turn, within budget.
 
@@ -99,6 +145,11 @@ def assemble(
     invisible.
     """
     budget = int(context_window * (1 - OUTPUT_RESERVE))
+
+    if capabilities:
+        system_prompt = (
+            f"{system_prompt}\n\n{CAPABILITY_PREAMBLE.format(capabilities=capabilities)}"
+        )
 
     fixed = estimate_tokens(system_prompt) + estimate_tokens(user_input)
     remaining = budget - fixed

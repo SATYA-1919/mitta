@@ -81,6 +81,53 @@ def must_not_restyle(text: str) -> bool:
     return bool(_NEVER_RESTYLE.search(text))
 
 
+#: Who a sentence is about. Swapping these is the subtlest way a restyle can
+#: change meaning while passing every other check, and it happened twice on the
+#: first day tools worked:
+#:
+#:     "Apple Music is now open on your Mac."
+#:  -> "apple music is now open on my mac ra"
+#:
+#:     "Apple Music is now open. Is there something specific you'd like to do?"
+#:  -> "there's something specific i'd like to do in apple music"
+#:
+#: The second is worse than a pronoun slip: the answer was deleted and a
+#: question to the user became MITTA narrating its own intentions. Nothing in
+#: the span, number or length checks could see either one.
+_SECOND_PERSON = re.compile(r"(?i)\b(you|your|yours|you'?re|you'?d|you'?ll|you'?ve)\b")
+_FIRST_PERSON = re.compile(r"(?i)\b(i|me|my|mine|i'?m|i'?d|i'?ll|i'?ve)\b")
+
+
+def _counts(text: str) -> tuple[int, int]:
+    return len(_SECOND_PERSON.findall(text)), len(_FIRST_PERSON.findall(text))
+
+
+def person_inverted(original: str, rewritten: str) -> bool:
+    """Whether the rewrite swapped who the reply is about.
+
+    Narrow on purpose. Dropping a pronoun is a legitimate restyle — "I have
+    opened it" to "opened it" loses an "I" and means the same thing. What is
+    never legitimate is one party disappearing from the sentence *and* the
+    other arriving in their place.
+
+    Symmetric, because both directions were observed within an hour:
+
+        "Apple Music is now open on your Mac."  ->  "... on my mac ra"
+        "I'm opening YouTube now."              ->  "you're opening youtube now"
+
+    The second is the worse of the two. It hands the user an instruction they
+    did not receive and lets MITTA off the hook for an action it claimed.
+    """
+    you_before, me_before = _counts(original)
+    you_after, me_after = _counts(rewritten)
+
+    # The user vanished and MITTA took their place.
+    if you_before > 0 and you_after == 0 and me_after > me_before:
+        return True
+    # MITTA vanished and the user took its place.
+    return me_before > 0 and me_after == 0 and you_after > you_before
+
+
 @dataclass(frozen=True, slots=True)
 class Violation:
     span: str
@@ -90,7 +137,7 @@ class Violation:
 def verify(original: str, rewritten: str) -> list[Violation]:
     """Check a rewrite. An empty list means it is safe to use.
 
-    Three checks, in increasing subtlety:
+    Four checks, in increasing subtlety:
 
     1. Every protected span still present.
     2. No new number introduced — a rewrite that invents "about 50" from
@@ -98,6 +145,7 @@ def verify(original: str, rewritten: str) -> list[Violation]:
     3. Length within bounds. A rewrite that triples the text has not restyled
        it, it has written something else; one that reduces a paragraph to two
        words has dropped content.
+    4. The subject did not move from the user to MITTA.
     """
     violations: list[Violation] = []
 
@@ -117,5 +165,8 @@ def verify(original: str, rewritten: str) -> list[Violation]:
     # "done ra"), so the floor only applies once there is real content to lose.
     if len(original) > 200 and len(rewritten) < len(original) * 0.25:
         violations.append(Violation("", "rewrite dropped most of the content"))
+
+    if person_inverted(original, rewritten):
+        violations.append(Violation("", "rewrite changed who the reply is about"))
 
     return violations

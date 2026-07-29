@@ -173,7 +173,15 @@ export const useStore = create<AppState>((set, get) => ({
   send: () => {
     const state = get();
     const text = state.draft.trim();
-    if (text.length === 0 || state.transport === null) return false;
+    if (text.length === 0) return false;
+    // Says so rather than returning false in silence. A dead Send button with
+    // no message on screen is indistinguishable from a frozen app, and it hid
+    // a real connection bug for an entire session — the transport had been
+    // detached out from under the store while the socket stayed open.
+    if (state.transport === null) {
+      set({ chatError: 'Not connected to MITTA — no transport attached.' });
+      return false;
+    }
     // One turn at a time. The sidecar would accept a second, but two streams
     // into one buffer would interleave into nonsense.
     if (state.activeTurn !== null && state.activeTurn.status === 'running') return false;

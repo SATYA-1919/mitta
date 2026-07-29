@@ -15,15 +15,15 @@ to attach, which is why `turns` is a table rather than a field on a message
 
 from __future__ import annotations
 
-import json
 import re
 import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any, Final
 
-from mitta.agent.context import AssembledContext, assemble
+from mitta.agent.context import AssembledContext, assemble, capability_lines
 from mitta.agent.extraction import MemoryExtractor
+from mitta.agent.planner import Plan, Planner
 from mitta.conversations.models import (
     ConversationDraft,
     InputKind,
@@ -36,11 +36,9 @@ from mitta.conversations.repository import ConversationRepository
 from mitta.errors import MittaError, ProviderError
 from mitta.llm.gateway import LLMGateway
 from mitta.llm.models import (
-    Capabilities,
     ChatMessage,
     ChatRequest,
     ModelDescriptor,
-    Role,
     TaskClass,
 )
 from mitta.memory.service import MemoryService
@@ -66,22 +64,6 @@ MEMORY_LIMIT = 6
 #: Conservative default until model capabilities are consulted per request.
 DEFAULT_CONTEXT_WINDOW = 32_000
 
-TOOL_SELECTION_PROMPT = """Decide whether a tool is needed for this request.
-
-If the user names an action a tool performs — search, open, save, write down —
-call that tool. An explicit instruction is not a question to be answered.
-
-Otherwise prefer calling nothing: most requests are answerable from what you
-already know, and that is the correct outcome.
-
-Match the request to the tool that does exactly that thing. Do not substitute a
-tool that is merely adjacent — opening an editor is not writing a file, and
-searching the web is not remembering something the user told you.
-
-If you call a tool, pass the user's actual values. Do not invent a filename, a
-query or an application the user did not name."""
-
-
 #: Words that suggest an action rather than a question. Deliberately generous —
 #: a false positive costs one cheap model call, a false negative means the tool
 #: silently never fires and the user concludes the feature does not work.
@@ -91,6 +73,10 @@ _TOOL_HINTS: Final = re.compile(
     r"save|write|note|record|jot|store this|"
     r"who won|what happened|when is|when did|price of|weather)\b"
 )
+
+
+def _default_planner(gateway: LLMGateway, tools: ToolExecutor | None) -> Planner | None:
+    return None if tools is None else Planner(gateway, tools)
 
 
 def wants_tools(text: str) -> bool:
@@ -133,6 +119,7 @@ class Orchestrator:
         tools: ToolExecutor | None = None,
         broker: ApprovalBroker | None = None,
         policy: PolicyEngine | None = None,
+        planner: Planner | None = None,
     ) -> None:
         self._conversations = conversations
         self._memory = memory
@@ -142,6 +129,10 @@ class Orchestrator:
         self._tools = tools
         self._broker = broker
         self._policy = policy
+        # Built here when tools exist and no planner was injected, so a caller
+        # that wires an executor gets chaining without having to know the
+        # planner exists. Tests inject one with tighter budgets.
+        self._planner = planner if planner is not None else _default_planner(gateway, tools)
 
     async def run(
         self,
@@ -212,11 +203,10 @@ class Orchestrator:
             )
 
             tool_messages: list[ChatMessage] = []
-            if self._tools is not None:
-                async for event, extra in self._run_tools(context, text, turn.id):
-                    if event is not None:
-                        yield event
-                    tool_messages.extend(extra)
+            async for event, extra in self._run_tools(text, turn.id):
+                if event is not None:
+                    yield event
+                tool_messages.extend(extra)
 
             yield TurnEvent("turn.thinking", {"phase": "reasoning"})
             request = ChatRequest(
@@ -332,15 +322,12 @@ class Orchestrator:
         )
 
     async def _run_tools(
-        self, context: AssembledContext, text: str, turn_id: str
+        self, text: str, turn_id: str
     ) -> AsyncIterator[tuple[TurnEvent | None, list[ChatMessage]]]:
-        """Let the model call tools before it answers.
+        """Let the model call tools, in a chain, before it answers.
 
-        A single round, not a loop. Multi-step tool chains need the planner, and
-        an unbounded loop here is how an agent spends someone's rate limit on a
-        question it could not answer. One round covers the case that actually
-        matters — "search for X, then tell me" — and the ceiling is visible
-        rather than emergent.
+        The chain itself is the planner's; this decides whether to start one and
+        forwards what it reports.
 
         `WRITE` tools are offered only when there is a way to ask permission.
         Showing a model a capability that cannot complete produces confident
@@ -352,99 +339,41 @@ class Orchestrator:
         on every one of them costs a round-trip *and* invites a spurious call:
         a model shown a hammer will find a nail.
         """
-        assert self._tools is not None
-
-        if not wants_tools(text):
+        if self._planner is None or not wants_tools(text):
             return
+
+        def ask(
+            name: str, params: dict[str, Any], prompt: str | None
+        ) -> AsyncIterator[tuple[TurnEvent | None, Execution | None]]:
+            return self._ask_then_run(name, params, prompt, turn_id)
 
         ceiling = Risk.WRITE if self._can_ask() else Risk.READ
-        order = {Risk.READ: 0, Risk.WRITE: 1, Risk.DESTRUCTIVE: 2}
-        schema = [
-            spec.to_wire() for spec in self._tools.specs() if order[spec.risk] <= order[ceiling]
-        ]
-        if not schema:
-            return
-
-        try:
-            decision = await self._gateway.complete(
-                ChatRequest(
-                    # A prompt about *choosing*, not about answering. The main
-                    # system prompt is about memory and says nothing that helps
-                    # pick between a web search and a file write.
-                    messages=[
-                        ChatMessage(Role.SYSTEM, TOOL_SELECTION_PROMPT),
-                        ChatMessage(Role.USER, text),
-                    ],
-                    task=TaskClass.CHAT,
-                    required=Capabilities(tools=True),
-                    tools=schema,
-                    stream=False,
-                    max_tokens=512,
-                )
-            )
-        except ProviderError:
-            # Tools are an enhancement. A failure here leaves the turn to answer
-            # from memory alone, which is what it would have done anyway.
-            log.warning("turn.tool_selection_failed", extra={"turn_id": turn_id})
-            return
-
-        calls = decision.tool_calls or []
-        if not calls:
-            return
-
-        # The assistant's own tool_calls message has to precede the results, or
-        # the provider rejects the `tool` messages as unmatched.
-        collected: list[ChatMessage] = [ChatMessage(Role.ASSISTANT, "", tool_calls=calls)]
-        for call in calls:
-            function = call.get("function") or {}
-            name = str(function.get("name") or "")
-            try:
-                arguments = json.loads(function.get("arguments") or "{}")
-            except json.JSONDecodeError:
-                arguments = {}
-            if not isinstance(arguments, dict):
-                arguments = {}
-
-            yield (
-                TurnEvent("turn.tool_started", {"tool": name, "params": arguments}),
-                [],
-            )
-
-            execution = await self._tools.execute(name, arguments, turn_id=turn_id)
-
-            if execution.awaiting_approval:
-                async for event, resolved in self._ask_then_run(
-                    name, arguments, execution.prompt, turn_id
-                ):
-                    if event is not None:
-                        yield (event, [])
-                    if resolved is not None:
-                        execution = resolved
-
-            yield (
-                TurnEvent(
-                    "turn.tool_finished",
-                    {
-                        "tool": name,
-                        "ok": execution.result.ok,
-                        "invocation_id": execution.invocation_id,
-                        # Surfaced so the user sees what MITTA did on their
-                        # behalf, not just that it did something (DEC-081).
-                        "summary": execution.result.content[:200],
-                    },
-                ),
-                [],
-            )
-
-            collected.append(
-                ChatMessage(
-                    Role.TOOL,
-                    execution.result.content,
-                    tool_call_id=str(call.get("id") or ""),
-                )
-            )
-
-        yield (None, collected)
+        async for item in self._planner.run(
+            text=text,
+            turn_id=turn_id,
+            ceiling=ceiling,
+            ask=ask if self._can_ask() else None,
+        ):
+            if isinstance(item, Plan):
+                # The transcript arrives whole, at the end. Emitting the
+                # messages step by step would let a half-built chain — an
+                # assistant `tool_calls` with no matching results yet — reach
+                # the answering request, which both providers reject.
+                if item.steps:
+                    yield (
+                        TurnEvent(
+                            "turn.plan",
+                            {
+                                "calls": len(item.steps),
+                                "stopped": item.stopped,
+                                "tools": [step.tool for step in item.steps],
+                            },
+                        ),
+                        [],
+                    )
+                yield (None, item.messages)
+            else:
+                yield (TurnEvent(item.type, item.data), [])
 
     def _can_ask(self) -> bool:
         return self._broker is not None and self._policy is not None
@@ -527,4 +456,7 @@ class Orchestrator:
             history=[m for m in history if m.content != text or m.role is not MessageRole.USER],
             memories=memories,
             context_window=DEFAULT_CONTEXT_WINDOW,
+            # What MITTA can actually do. Without this the answering model
+            # guesses, and it guesses that an assistant cannot open anything.
+            capabilities=capability_lines(self._tools.specs()) if self._tools is not None else "",
         )

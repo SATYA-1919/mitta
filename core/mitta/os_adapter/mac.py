@@ -56,3 +56,21 @@ class MacAdapter:
             capture_output=True,
             timeout=15,
         )
+
+    def open_url(self, url: str) -> None:
+        """`open <url>`, with the scheme re-checked here.
+
+        The caller validates too, but this is the point where a string becomes
+        a process and `open` will happily hand a `file:` or a custom app scheme
+        to whatever registered for it. A check on only one side of a boundary
+        is a check that disappears the first time someone adds a second caller.
+        """
+        if not url.startswith(("http://", "https://")):
+            raise ValueError("only http and https URLs may be opened")
+
+        subprocess.run(  # noqa: S603 - list form, no shell
+            ["/usr/bin/open", url],
+            check=True,
+            capture_output=True,
+            timeout=15,
+        )

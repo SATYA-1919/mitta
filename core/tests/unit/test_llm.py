@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Sequence
 from pathlib import Path
 
+import httpx
 import pytest
 
 from mitta.errors import (
@@ -28,7 +29,7 @@ from mitta.llm.models import (
     Usage,
 )
 from mitta.llm.provider import select_model
-from mitta.llm.providers.openai_compatible import parse_sse_line
+from mitta.llm.providers.openai_compatible import _recover_tool_call, parse_sse_line
 
 
 def model(
@@ -464,3 +465,88 @@ class TestToolGating:
         from mitta.agent.orchestrator import wants_tools
 
         assert wants_tools("could you find out the current price") is True
+
+
+class TestLegacyToolCallRecovery:
+    """A provider rejecting its own model's output.
+
+    `llama-3.3-70b` on Groq intermittently emits the old `<function=...>` form
+    instead of JSON, and Groq answers with a 400 that contains the intended
+    call. Observed on five of six identical requests; the model had chosen the
+    right tool and the right argument every time.
+
+    Failing over instead reached a model that returned no call and no text, so
+    "open youtube" did nothing and said nothing.
+    """
+
+    @staticmethod
+    def _response(body: object, status: int = 400) -> httpx.Response:
+        return httpx.Response(status, json=body)
+
+    def test_a_rejected_legacy_call_is_recovered(self) -> None:
+        recovered = _recover_tool_call(
+            self._response(
+                {
+                    "error": {
+                        "message": "Failed to call a function. Please adjust your prompt.",
+                        "failed_generation": '<function=open_url{"url": "youtube"}</function>',
+                    }
+                }
+            )
+        )
+
+        assert recovered == [
+            {
+                "id": "recovered_0",
+                "type": "function",
+                # Re-encoded, so what reaches the rest of the system is the
+                # ordinary shape rather than a second format to handle.
+                "function": {"name": "open_url", "arguments": '{"url": "youtube"}'},
+            }
+        ]
+
+    def test_several_calls_in_one_generation_are_all_recovered(self) -> None:
+        recovered = _recover_tool_call(
+            self._response(
+                {
+                    "error": {
+                        "failed_generation": (
+                            '<function=web_search{"query": "barcelona"}</function>'
+                            '<function=write_note{"path": "a.md"}</function>'
+                        )
+                    }
+                }
+            )
+        )
+
+        assert recovered is not None
+        assert [c["function"]["name"] for c in recovered] == ["web_search", "write_note"]
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            {"error": {"message": "rate limited"}},
+            {"error": {"failed_generation": "just some prose, no call"}},
+            # Malformed on both counts: nothing reliable to recover.
+            {"error": {"failed_generation": "<function=open_url{not json}</function>"}},
+            {"error": "a string, not an object"},
+            {},
+        ],
+    )
+    def test_anything_else_falls_through_to_the_normal_error_path(self, body: object) -> None:
+        assert _recover_tool_call(self._response(body)) is None
+
+    def test_a_non_400_is_never_inspected(self) -> None:
+        # A 429 must stay a rate limit so the router still fails over.
+        assert (
+            _recover_tool_call(
+                self._response(
+                    {"error": {"failed_generation": '<function=open_url{"url": "x"}</function>'}},
+                    status=429,
+                )
+            )
+            is None
+        )
+
+    def test_a_non_json_body_does_not_raise(self) -> None:
+        assert _recover_tool_call(httpx.Response(400, text="<html>gateway error</html>")) is None

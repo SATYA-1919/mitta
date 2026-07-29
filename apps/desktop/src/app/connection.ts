@@ -87,7 +87,36 @@ async function awaitRuntime(): Promise<RuntimeInfo> {
   }
 }
 
-export async function connect(): Promise<Connection | null> {
+/**
+ * The one connection this window has, memoised.
+ *
+ * The connection is owned by the *window*, not by a component. It was
+ * previously established inside a React effect that disposed on cleanup, and
+ * under StrictMode — which `make app` runs, because the shell loads the dev
+ * server (DEC-089) — that mounted twice and opened two of everything.
+ *
+ * The two racing bootstraps then fought over one store slot. Whichever
+ * finished second called `attachChat`, and whichever was cancelled called
+ * `attachChat(null, null)` on its way out, so the surviving socket's transport
+ * could be erased from the store *after* being installed. Ordering was not
+ * incidental either: the first bootstrap pays for `import('@tauri-apps/api')`
+ * and the second gets it from cache, so the second regularly won.
+ *
+ * The result was a window that showed `open`, held a live socket, and had a
+ * Send button that did nothing at all — `send()` found a null transport and
+ * returned false without a word.
+ *
+ * Memoising makes the second call return the first's promise instead of
+ * building a rival connection.
+ */
+let established: Promise<Connection | null> | null = null;
+
+export function connect(): Promise<Connection | null> {
+  established ??= establish();
+  return established;
+}
+
+async function establish(): Promise<Connection | null> {
   const store = useStore.getState();
 
   let runtime: RuntimeInfo;
@@ -102,6 +131,9 @@ export async function connect(): Promise<Connection | null> {
         ? 'No shell and no VITE_MITTA_* — use `make app` for the window, or `make dev` for the browser'
         : describe(error);
     store.setConnection('closed', detail);
+    // Cleared so a later caller can try again. A cached rejection would make
+    // the failure permanent for the lifetime of the window.
+    established = null;
     return null;
   }
 
@@ -136,15 +168,25 @@ export async function connect(): Promise<Connection | null> {
   useMemoryStore.getState().attach(api);
   useStore.getState().attachChat(api, transport);
 
-  return {
+  const connection: Connection = {
     api,
     transport,
     dispose: () => {
       unbind();
       unlistenMetrics();
-      useMemoryStore.getState().attach(null);
-      useStore.getState().attachChat(null, null);
       transport.close();
+      // Only detach what is still attached. Clearing unconditionally is how a
+      // disposed connection used to erase a live one's transport.
+      if (useStore.getState().transport === transport) {
+        useMemoryStore.getState().attach(null);
+        useStore.getState().attachChat(null, null);
+      }
+      if (established !== null) {
+        void established.then((held) => {
+          if (held === connection) established = null;
+        });
+      }
     },
   };
+  return connection;
 }

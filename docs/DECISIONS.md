@@ -2480,3 +2480,155 @@ ago and never reached a terminal.
 **Also.** The index gauge showed **100** with zero vectors, because coverage
 divided by a total of zero and fell back to `1`. A full ring over nothing is
 precisely the fabricated reading the rest of that file refuses to show.
+
+
+---
+
+## DEC-100 — The Send button did nothing, and said nothing about it
+
+**The bug.** A connected window with a live socket, a lit Send button, and no
+effect from clicking it. No error on screen, nothing in the console.
+
+`main.tsx` established the connection inside a React effect that disposed on
+cleanup. StrictMode double-invokes effects in development, and `make app` loads
+the dev server (DEC-089), so the window always mounted twice. Two bootstraps
+raced for one store slot:
+
+* Each called `attachChat(api, transport)` on completion.
+* The cancelled one called `attachChat(null, null)` on its way out.
+
+Ordering was not incidental. The first bootstrap pays for
+`import('@tauri-apps/api')`; the second gets it from the module cache, so the
+second regularly finished **first**. The late dispose from the first then
+detached the transport the second had already installed. The socket stayed
+open, so the header still read `open`, while `send()` found `transport === null`.
+
+**Two fixes, because either alone leaves a hole.**
+
+`connect()` is memoised, and the connection belongs to the window rather than to
+a component — `main.tsx` no longer disposes it. `dispose()` additionally only
+detaches what is still attached, so a stale connection cannot clear a live one.
+
+**And `send()` now says so.** It returned `false` in silence on a null
+transport. That silence is why the defect survived a whole session: a dead
+button with no message is indistinguishable from a frozen app, and it sent
+diagnosis to the backend, which was fine throughout. This is the fourth
+connection bug in this project whose real cost was the absence of a message
+(DEC-097, DEC-099).
+
+
+---
+
+## DEC-101 — The planner: bounded chains, replacing DEC-083's single round
+
+DEC-083 shipped one round of tools and argued that an unbounded loop is how an
+agent spends someone's rate limit on a question it could not answer. That is
+still true. The conclusion was wrong: the answer to an unbounded loop is a
+bounded one, not a single step.
+
+One round cannot satisfy "search for X and save it" — the second tool's
+argument is the first tool's output. Under one round the model drops half the
+request or invents the missing argument.
+
+**The ceilings.** Four rounds, six calls, and a repeat check. The repeat check
+is the one that matters. The failure mode of a tool loop is not six different
+useful actions, it is the same call twice because the first result did not
+contain the answer — and it happened on the first live run: asked to open Apple
+Music, the model called `open_app("Apple Music")`, then `open_app("Music")`,
+then `open_app("Apple Music")` again. The third was recognised and answered from
+the first result; `tool_invocations` recorded two executions for three calls.
+
+**A denial ends the chain.** A permission dialog that reappears after you say no
+is one people learn to click through.
+
+
+---
+
+## DEC-102 — Groq rejects its own model's tool calls, so we recover them
+
+**Symptom.** "open youtube" did nothing and said nothing. No tool ran.
+
+**What the log said.** `groq rejected the request: Failed to call a function.`
+Then failover to OpenRouter, reported as *succeeded* — with no tool call and no
+text. An empty success is why the turn produced silence rather than an error.
+
+**What was actually happening**, from Groq's own error body:
+
+    failed_generation: <function=open_url{"url": "youtube"}</function>
+
+`llama-3.3-70b` intermittently emits its legacy pseudo-XML tool call instead of
+JSON, and Groq's parser rejects it. Five of six identical requests failed this
+way. **The model chose the right tool with the right argument every time.** Only
+the transport disagreed, and it handed the intended call back in the error.
+
+**Decision.** `_recover_tool_call` parses that one known format out of a 400 and
+re-encodes it as an ordinary tool call. Narrow on purpose: 400 only, one regex,
+strict JSON, and anything that does not match exactly falls through to the
+normal typed-error path so a 429 still fails over.
+
+**A wrong diagnosis, recorded because it was convincing.** `hey mitta open
+YouTube` failed while `open youtube` succeeded — twice, reproducibly enough to
+act on. A vocative-stripping fix was written and it did not help, because the
+correlation was coincidence on a five-in-six failure rate. `strip_address`
+survives on its own merits and its comment now says this. The lesson is
+DEC-097's again: two samples of a flaky endpoint are not a diagnosis, and the
+provider's error body had the answer in it the whole time.
+
+
+---
+
+## DEC-103 — MITTA denied capabilities it had used a minute earlier
+
+Asked to open YouTube it said *"I cannot open YouTube yet."* Asked why, it said
+it was *"a text-based desktop assistant with no capability to directly interact
+with external applications"* — having opened Apple Music moments before.
+
+Two causes.
+
+**No tool for the request.** `open_app` launches applications; YouTube is a
+website; nothing joined them. `open_url` now exists, with scheme validation on
+both sides of the OS-adapter boundary because `open` dispatches on scheme and a
+registered handler will take `file:` or a custom app scheme.
+
+**The answering model was never told what it could do.** The system prompt
+described how to behave with tool results but never listed the tools, so the
+model fell back on what an assistant usually cannot do. A capability preamble is
+now assembled from the registry.
+
+**The first version of that preamble was worse than the problem.** It said "if a
+tool did not run, say what you are about to do", and MITTA duly replied *"you're
+opening youtube now"* with nothing running. A capability is not an action. The
+wording now separates them: never claim to be text-only, and never claim an
+action that has no tool result above it.
+
+
+---
+
+## DEC-104 — The personality pass was changing who the reply was about
+
+DEC-076 says the rewrite is verified rather than trusted. The verification had a
+hole, and two live replies went through it:
+
+    "Apple Music is now open on your Mac."
+        -> "apple music is now open on my mac ra"
+
+    "Apple Music is now open. Is there something specific you'd like to do?"
+        -> "there's something specific i'd like to do in apple music"
+
+The first moves the user's machine to MITTA. The second deletes the answer
+outright and turns a question *to* the user into MITTA narrating its own
+intentions. Every existing check passed both: no protected span, no invented
+number, and lengths well inside the bounds.
+
+A third arrived from the opposite direction once tools worked:
+
+    "I'm opening YouTube now." -> "you're opening youtube now"
+
+**Decision.** `person_inverted` rejects a rewrite where one party disappears
+from the text *and* the other arrives in their place. Symmetric, and narrow:
+dropping a pronoun is a legitimate restyle — "I have opened it" to "opened it"
+means the same thing — so only a swap is refused, never a loss.
+
+The rewrite prompts also now say not to drop a sentence, and that a question to
+the user stays a question to the user. The prompt is the request; the check is
+the guarantee.

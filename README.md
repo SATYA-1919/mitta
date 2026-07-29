@@ -31,7 +31,8 @@ make dev                            # or in a browser at http://127.0.0.1:1420
 | **Learning** | Durable facts extracted from conversation, credentials refused |
 | **Reasoning** | Groq and OpenRouter with health-based failover |
 | **Personality** | Register-based rewrite, verified so it cannot change meaning |
-| **Tools** | Web search, open an application, write a note |
+| **Tools** | Web search, open an application, open a website, write a note |
+| **Planner** | Bounded tool chains — four rounds, six calls, repeats served from cache |
 | **Permissions** | Parameter-bound single-use approvals, hash-chained audit log |
 | **Surfaces** | Chat, Memory, History, Monitor, Settings |
 | **Shell** | Tauri window, sidecar supervisor, Keychain, ⌘⇧Space palette |
@@ -40,9 +41,11 @@ make dev                            # or in a browser at http://127.0.0.1:1420
 
 Projects, Tasks and Plugins are placeholders and say so. There is no voice
 input — the wake word is decided ("MITTA") but Apple ships no wake-word API and
-the activation mechanism is still open (R7). No planner, so tool use is one
-round rather than a chain. Tool *selection* is unreliable: naming the tool
-works, natural phrasing is hit-or-miss.
+the activation mechanism is still open (R7).
+
+Tool selection depends on a provider that intermittently rejects its own
+model's tool calls. MITTA recovers the call from Groq's error body when it can
+(DEC-102), but a chain is still only as reliable as the model driving it.
 
 ## Checking it rather than trusting it
 

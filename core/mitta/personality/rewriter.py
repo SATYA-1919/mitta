@@ -40,6 +40,10 @@ Occasional sentence-final "ra" or "re" is natural but do not force it.
 Keep every fact, number, name, path, command, URL and code block exactly as
 written. Do not add information. Do not remove information.
 
+Rewrite every sentence. Do not drop one, including the first — it is usually
+the answer. Never change who the reply is about: "your Mac" stays "your Mac",
+and a question you are asking the user stays a question to the user.
+
 Return only the rewritten reply."""
 
 SERIOUS_STYLE = """Rewrite the reply so it sounds like a person, not a manual.
@@ -50,6 +54,10 @@ Remove corporate padding: "I'd be happy to", "Certainly", "Great question",
 
 Keep every fact, number, name, path, command, URL and code block exactly as
 written. Do not add information. Do not remove information.
+
+Rewrite every sentence. Do not drop one. Never change who the reply is about:
+"your Mac" stays "your Mac", and a question you are asking the user stays a
+question to the user.
 
 Return only the rewritten reply."""
 

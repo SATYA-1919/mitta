@@ -58,3 +58,13 @@ class OSAdapter(Protocol):
         as untrusted — this is the point where a string becomes a process.
         """
         ...
+
+    def open_url(self, url: str) -> None:
+        """Open a URL in the user's default browser.
+
+        Separate from `open_application` because the platform call is different
+        and, more importantly, because the risk is: a URL reaches the network,
+        and the scheme decides what the OS hands the string to. Callers validate
+        that it is `http`/`https`; implementations must not widen that.
+        """
+        ...

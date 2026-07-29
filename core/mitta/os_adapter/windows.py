@@ -37,3 +37,8 @@ class WindowsAdapter:
 
     def open_application(self, name: str) -> None:
         raise NotImplementedError(_DEFERRED)
+
+    def open_url(self, url: str) -> None:
+        # Should be `start "" <url>` via the shell association, after rejecting
+        # any scheme that is not http or https.
+        raise NotImplementedError(_DEFERRED)
