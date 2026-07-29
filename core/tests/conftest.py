@@ -17,6 +17,7 @@ from fastapi.testclient import TestClient
 from mitta.api.app import create_app
 from mitta.config.paths import Paths
 from mitta.config.settings import DatabaseSettings, Settings
+from mitta.conversations.repository import ConversationRepository
 from mitta.llm.gateway import LLMGateway
 from mitta.llm.providers.groq import GroqProvider
 from mitta.llm.providers.openrouter import OpenRouterProvider
@@ -94,6 +95,7 @@ def client(
     indexer: Indexer,
     embedder: DeterministicEmbedder,
     gateway: LLMGateway,
+    conversations: ConversationRepository,
 ) -> Iterator[TestClient]:
     app = create_app(
         settings=settings,
@@ -108,6 +110,7 @@ def client(
         indexer=None,
         embedder=embedder,
         gateway=gateway,
+        conversations=conversations,
     )
     with TestClient(app) as test_client:
         yield test_client
@@ -180,3 +183,8 @@ def gateway() -> LLMGateway:
     on it. Failover behaviour is covered against fakes in `test_llm.py`.
     """
     return LLMGateway([GroqProvider(None), OpenRouterProvider(None)])
+
+
+@pytest.fixture
+def conversations(migrated: Database) -> ConversationRepository:
+    return ConversationRepository(migrated)

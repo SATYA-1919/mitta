@@ -28,6 +28,7 @@ from fastapi import FastAPI
 from mitta.api.app import create_app
 from mitta.config.paths import Paths, resolve_paths
 from mitta.config.settings import Settings, load_settings
+from mitta.conversations.repository import ConversationRepository
 from mitta.llm import keys
 from mitta.llm.gateway import LLMGateway
 from mitta.llm.providers.groq import GroqProvider
@@ -61,6 +62,7 @@ class Runtime:
     memory: MemoryService
     indexer: Indexer
     gateway: LLMGateway
+    conversations: ConversationRepository
     app: FastAPI
 
     def shutdown(self) -> None:
@@ -128,6 +130,12 @@ def build_runtime(
 
     gateway = _build_gateway(redactor)
 
+    conversations = ConversationRepository(database)
+    # A turn still marked `running` is one the process died during. Reconciled
+    # at startup so the UI never shows a thinking indicator for work that no
+    # process is doing.
+    conversations.reconcile_orphaned_turns()
+
     embedder = _select_embedder(paths)
     repository = MemoryRepository(database)
     store = VectorStore(database, build_index(paths.vectors / "memories.faiss", embedder), embedder)
@@ -153,6 +161,7 @@ def build_runtime(
         indexer=indexer,
         embedder=embedder,
         gateway=gateway,
+        conversations=conversations,
     )
 
     return Runtime(
@@ -164,6 +173,7 @@ def build_runtime(
         memory=memory,
         indexer=indexer,
         gateway=gateway,
+        conversations=conversations,
         app=app,
     )
 

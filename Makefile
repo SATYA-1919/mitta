@@ -11,7 +11,7 @@ SHELL_DIR := apps/desktop/src-tauri
 CARGO   ?= $(HOME)/.cargo/bin/cargo
 
 .DEFAULT_GOAL := help
-.PHONY: help venv install install-ui secrets install-hooks test test-unit test-integration lint typecheck arch \
+.PHONY: help venv install install-ui secrets install-hooks set-key-groq set-key-openrouter test test-unit test-integration lint typecheck arch \
         check check-ui check-all run clean \
         dev dev-real ui-dev ui-build ui-test ui-typecheck ui-budget gen-types download-model \
         shell-build shell-test shell-lint shell-run check-shell
@@ -49,6 +49,12 @@ typecheck:  ## mypy --strict
 
 arch:  ## Verify the layer dependency contracts (DEC-029)
 	cd $(CORE) && ../$(VENV)/bin/lint-imports --config importlinter.ini
+
+set-key-groq:  ## Paste your Groq key into .env (hidden input, no shell history)
+	./scripts/set-key.sh groq
+
+set-key-openrouter:  ## Paste your OpenRouter key into .env
+	./scripts/set-key.sh openrouter
 
 secrets:  ## Fail if a credential is in a committed file
 	python3 scripts/check-no-secrets.py

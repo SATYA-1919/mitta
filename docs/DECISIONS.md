@@ -1544,3 +1544,80 @@ actually fail, and a bad plan costs far more than a better model. The
 personality rewrite runs on **every reply**, so its latency is felt directly and
 its cost is multiplied by every message ever sent — spending a frontier model on
 a constrained restyle is the clearest waste in the system.
+
+
+---
+
+## DEC-067 — `make set-key`, because editing the file kept failing silently
+
+**Problem.** Three attempts to get a key into `.env` produced an empty file. The
+failure modes are all silent: an unsaved editor buffer, a paste into
+`.env.example` (which is committed), a stray quote, a trailing newline. None
+announce themselves — the key is simply absent, and the application reports "not
+configured" with nothing to explain why.
+
+**Decision.** `scripts/set-key.sh`, wired as `make set-key-groq` and
+`make set-key-openrouter`. Reads with `read -s`, so the key is never echoed and
+never enters shell history; strips whitespace and quotes; writes through a 0600
+temp file and renames; then reads the value back and reports its length and
+first four characters to confirm it landed.
+
+**Why a script rather than better documentation.** The instructions were already
+correct and were followed three times without success. When a manual step fails
+repeatedly, the step is the defect.
+
+`awk` rather than `sed -i` for the in-place edit: a key can contain characters
+`sed` treats as delimiters or backreferences, and silently mangling a credential
+is worse than not writing one.
+
+---
+
+## DEC-068 — Conversation records are dataclasses; wire schemas alias `register`
+
+**Problem.** A Pydantic field named `register` shadows `ABCMeta.register`.
+Pydantic warns, and the warning is not cosmetic: it takes the bound metaclass
+method as the field's **default**, and OpenAPI generation then fails with
+"Default value ... is not JSON serializable". That breaks the generated
+TypeScript, which is the frontend's only source of types.
+
+The name is fixed in three places at once — the `messages.register` column, the
+API contract, and DEC-033, where the concept is defined.
+
+**First attempt, and why it was wrong.** A scoped `filterwarnings` entry. It
+silenced the message and left the breakage, which is the worst of both: the
+warning was reporting something real, and suppressing it only moved the failure
+somewhere less obvious.
+
+**Decision.** Two different fixes for two different layers:
+
+* **Domain records** (`Conversation`, `Turn`, `Message`, `MessageDraft`) become
+  frozen dataclasses. They are built from trusted database rows and never
+  validate untrusted input, so Pydantic was buying nothing — the same reasoning
+  as `mitta.llm.models`.
+* **Wire schemas** stay Pydantic, because they are the OpenAPI source of truth.
+  The Python attribute is `style_register`; `Field(alias="register")` keeps the
+  external name correct. Verified in the generated output:
+  `register: components["schemas"]["Register"] | null`.
+
+---
+
+## DEC-069 — Turns are separate from messages, and orphans are reconciled at startup
+
+**Decision.** Three levels: conversation, turn, message. A turn owns the plan,
+the tool calls and the token accounting.
+
+**Why not fold turns into messages.** It works until the first multi-step
+request, at which point "cancel this" has nothing to address and "what did that
+cost" has nothing to sum. One user message can produce a plan, six tool calls
+and three assistant messages; the turn is what makes that one unit.
+
+**Orphan reconciliation.** A turn still marked `running` at startup is one the
+process died during. `reconcile_orphaned_turns` marks them failed with
+`turn.interrupted`. Without it the UI shows a thinking indicator for work no
+process is doing, forever, and the only fix a user could find is deleting the
+conversation.
+
+**No send-message endpoint yet.** Sending is a turn and a turn needs the agent.
+An endpoint that persists a user message with nothing to answer it would be
+worse than its absence — it would look like chat and never reply. A test asserts
+against the live route table that no `POST` exists on the messages path.
