@@ -413,3 +413,54 @@ class TestKeys:
 
     def test_a_missing_file_is_not_an_error(self, tmp_path: Path) -> None:
         assert keys.load_env_file(tmp_path / "nope.env", environ={}) == {}
+
+
+class TestToolGating:
+    """When a tool-selection round-trip is worth making.
+
+    Asking the model on every turn costs a call on the many turns that need
+    nothing, and reliably produces spurious calls — a model shown a hammer will
+    find a nail. Both directions of the gate matter.
+    """
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "search the web for barca news",
+            "look up the latest ballon d'or winner",
+            "open spotify",
+            "save a note called ideas.md",
+            "write this down for me",
+            "who won the match today",
+            "what's the weather",
+        ],
+    )
+    def test_action_requests_reach_the_selector(self, text: str) -> None:
+        from mitta.agent.orchestrator import wants_tools
+
+        assert wants_tools(text) is True
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "who do i support in football",
+            "hey",
+            "explain how FAISS indexes work",
+            "what did we decide about the schema",
+            "thanks",
+            "why is my code failing",
+        ],
+    )
+    def test_ordinary_questions_skip_it(self, text: str) -> None:
+        # These are answerable from memory and the model's own knowledge.
+        # Offering tools here is how "who do i support" becomes a web search.
+        from mitta.agent.orchestrator import wants_tools
+
+        assert wants_tools(text) is False
+
+    def test_the_gate_is_generous_rather_than_precise(self) -> None:
+        # A false positive costs one cheap call. A false negative means the tool
+        # silently never fires and the user concludes the feature is broken.
+        from mitta.agent.orchestrator import wants_tools
+
+        assert wants_tools("could you find out the current price") is True

@@ -38,8 +38,9 @@ class OpenAppTool:
         return ToolSpec(
             name="open_app",
             description=(
-                "Open an application on the user's Mac by name, e.g. 'Safari', "
-                "'Spotify', 'Visual Studio Code'."
+                "Launch an application by name, e.g. 'Safari', 'Spotify', "
+                "'Visual Studio Code'. Only opens the app. Does NOT create, "
+                "edit or open a file — use write_note to save something."
             ),
             risk=Risk.READ,
             parameters={

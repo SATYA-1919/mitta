@@ -61,8 +61,9 @@ class WebSearchTool:
         return ToolSpec(
             name="web_search",
             description=(
-                "Search the web for current information. Use this for anything "
-                "you do not know or that may have changed recently."
+                "Search the web. Use for current events, news, prices, scores, "
+                "or any fact that may have changed recently. Do NOT use to "
+                "recall something the user told you — that is already in memory."
             ),
             risk=Risk.READ,
             parameters={

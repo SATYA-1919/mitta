@@ -31,8 +31,9 @@ class WriteNoteTool:
         return ToolSpec(
             name="write_note",
             description=(
-                "Save a note to a file in the user's MITTA notes folder. Use when "
-                "asked to write something down or save something for later."
+                "Write text to a file in the user's notes folder. Use whenever "
+                "asked to save, write down, note, jot or record something. This "
+                "is the tool that writes files — do not open an editor instead."
             ),
             risk=Risk.WRITE,
             parameters={

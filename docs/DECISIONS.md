@@ -2390,3 +2390,54 @@ on purpose and a grep over prose matched it on the first run.
 **The general lesson.** When a symptom has one name and several causes, fixing
 causes one at a time is guesswork with a good story attached. Making the system
 say which cause it is turns the next report into an answer.
+
+
+---
+
+## DEC-098 — Tool routing: a cheap gate, a dedicated prompt, and honest descriptions
+
+**The problem.** Tool selection was unreliable. "Save a note called ideas.md"
+opened Visual Studio Code. "Search the web for barcelona news" called nothing.
+Naming the tool worked; natural phrasing was a coin flip.
+
+Three causes, each fixed separately.
+
+**1. The selection pass reused the main system prompt.** That prompt is about
+memory and says nothing that helps choose between a web search and a file write.
+It now has its own, which describes *choosing* rather than answering, and names
+the specific confusion that kept happening: opening an editor is not writing a
+file.
+
+**2. The gate did not exist.** Every turn asked the model "do you want a tool?",
+which costs a round-trip on the many turns that need none and reliably produces
+spurious calls — a model shown a hammer will find a nail. `wants_tools()` is a
+cheap deterministic check on the request. It is deliberately **generous**: a
+false positive costs one cheap call, a false negative means the tool silently
+never fires and the user concludes the feature is broken.
+
+**3. "Prefer calling nothing" over-corrected.** After adding the prompt, an
+explicit "search the web for X" returned no tool at all. The instruction to
+prefer answering was outweighing a request that literally named the action. The
+prompt now says an explicit instruction is not a question to be answered, and
+keeps the preference for everything else.
+
+**Descriptions say when *not* to reach for a tool.** A description of what a
+tool *is* helps less than one that draws the boundary: `open_app` says it does
+not create or edit a file, `web_search` says it is not for recalling something
+the user said. Both sentences exist because the model got exactly those wrong.
+
+**Verified live**, on the phrasings that previously failed:
+
+    save a note called ideas.md ...      -> write_note   (was open_app)
+    search the web for barcelona news    -> web_search   (was nothing)
+    look up who won the ballon d'or      -> web_search
+    whats the latest news on neymar      -> web_search
+    who do i support in football         -> no tool
+    explain how FAISS works              -> no tool
+
+**Also fixed here:** the `WRITE`-tool ceiling from DEC-083 had never actually
+applied — an earlier edit silently failed and the code still filtered to `READ`
+only, while the docstring above it described the ceiling. `write_note` was
+therefore never offered at all. The second time in this project that a string
+replacement did not take and nothing failed; both times the symptom was a
+capability quietly not existing.

@@ -16,10 +16,11 @@ to attach, which is why `turns` is a table rather than a field on a message
 from __future__ import annotations
 
 import json
+import re
 import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Final
 
 from mitta.agent.context import AssembledContext, assemble
 from mitta.agent.extraction import MemoryExtractor
@@ -64,6 +65,42 @@ MEMORY_LIMIT = 6
 
 #: Conservative default until model capabilities are consulted per request.
 DEFAULT_CONTEXT_WINDOW = 32_000
+
+TOOL_SELECTION_PROMPT = """Decide whether a tool is needed for this request.
+
+If the user names an action a tool performs — search, open, save, write down —
+call that tool. An explicit instruction is not a question to be answered.
+
+Otherwise prefer calling nothing: most requests are answerable from what you
+already know, and that is the correct outcome.
+
+Match the request to the tool that does exactly that thing. Do not substitute a
+tool that is merely adjacent — opening an editor is not writing a file, and
+searching the web is not remembering something the user told you.
+
+If you call a tool, pass the user's actual values. Do not invent a filename, a
+query or an application the user did not name."""
+
+
+#: Words that suggest an action rather than a question. Deliberately generous —
+#: a false positive costs one cheap model call, a false negative means the tool
+#: silently never fires and the user concludes the feature does not work.
+_TOOL_HINTS: Final = re.compile(
+    r"(?i)\b(search|look ?up|google|find out|latest|news|current|today|"
+    r"open|launch|start|run|"
+    r"save|write|note|record|jot|store this|"
+    r"who won|what happened|when is|when did|price of|weather)\b"
+)
+
+
+def wants_tools(text: str) -> bool:
+    """Whether this request is worth a tool-selection round-trip.
+
+    Cheap and deterministic. The alternative — asking the model on every turn —
+    costs a call on the many turns that need nothing, and reliably produces
+    spurious tool calls, because a model shown a hammer will find a nail.
+    """
+    return bool(_TOOL_HINTS.search(text))
 
 
 @dataclass(frozen=True, slots=True)
@@ -305,20 +342,39 @@ class Orchestrator:
         matters — "search for X, then tell me" — and the ceiling is visible
         rather than emergent.
 
-        Only `READ` tools are offered. Anything that writes needs the approval
-        round-trip through the UI, which does not exist yet; showing the model a
-        capability that cannot complete would produce confident promises MITTA
-        cannot keep.
+        `WRITE` tools are offered only when there is a way to ask permission.
+        Showing a model a capability that cannot complete produces confident
+        promises MITTA cannot keep, and a capability never offered cannot be
+        requested — which is cheaper than refusing the call afterwards.
+
+        The pass is skipped entirely when nothing in the request suggests a
+        tool. Most turns need none, and asking the model "do you want a tool?"
+        on every one of them costs a round-trip *and* invites a spurious call:
+        a model shown a hammer will find a nail.
         """
         assert self._tools is not None
-        schema = [spec.to_wire() for spec in self._tools.specs() if spec.risk is Risk.READ]
+
+        if not wants_tools(text):
+            return
+
+        ceiling = Risk.WRITE if self._can_ask() else Risk.READ
+        order = {Risk.READ: 0, Risk.WRITE: 1, Risk.DESTRUCTIVE: 2}
+        schema = [
+            spec.to_wire() for spec in self._tools.specs() if order[spec.risk] <= order[ceiling]
+        ]
         if not schema:
             return
 
         try:
             decision = await self._gateway.complete(
                 ChatRequest(
-                    messages=context.messages,
+                    # A prompt about *choosing*, not about answering. The main
+                    # system prompt is about memory and says nothing that helps
+                    # pick between a web search and a file write.
+                    messages=[
+                        ChatMessage(Role.SYSTEM, TOOL_SELECTION_PROMPT),
+                        ChatMessage(Role.USER, text),
+                    ],
                     task=TaskClass.CHAT,
                     required=Capabilities(tools=True),
                     tools=schema,
