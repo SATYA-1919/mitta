@@ -1,0 +1,105 @@
+/**
+ * Design tokens — the only place a colour, duration or radius is defined.
+ *
+ * R2: dark, matte black / graphite, developer-oriented, premium. References are
+ * Linear, Raycast, Warp, Cursor. Explicitly not: neon, glow, holograms, or
+ * anything that reads as a movie prop.
+ *
+ * Values are OKLCH rather than hex. Perceptual uniformity is what lets a ramp be
+ * built by stepping lightness and have every step *look* evenly spaced — the
+ * same arithmetic in sRGB produces a scale that bunches in the mid tones, which
+ * is the usual reason a hand-built dark palette feels muddy.
+ *
+ * Chroma stays under 0.01 across the entire surface ramp. That is what "matte"
+ * means numerically: the greys are near-neutral with a single consistent hue
+ * (285, a cool graphite), so nothing in the chrome competes with content.
+ */
+
+@theme {
+  /* ── Surfaces ──────────────────────────────────────────────────────────
+     A five-step ramp, not a two-step one. Depth in a dark UI has to be carried
+     by lightness because shadow is nearly invisible against near-black. */
+  --color-surface-sunken: oklch(0.125 0.004 285);
+  --color-surface-base: oklch(0.155 0.005 285);
+  --color-surface-raised: oklch(0.188 0.006 285);
+  --color-surface-overlay: oklch(0.215 0.007 285);
+  --color-surface-input: oklch(0.235 0.007 285);
+  --color-surface-hover: oklch(0.255 0.008 285);
+  --color-surface-active: oklch(0.285 0.009 285);
+
+  /* ── Borders ─────────────────────────────────────────────────────────── */
+  --color-border-subtle: oklch(0.265 0.008 285);
+  --color-border-default: oklch(0.315 0.009 285);
+  --color-border-strong: oklch(0.395 0.011 285);
+
+  /* ── Foreground ──────────────────────────────────────────────────────── */
+  --color-fg-primary: oklch(0.965 0.002 285);
+  --color-fg-secondary: oklch(0.755 0.006 285);
+  --color-fg-muted: oklch(0.585 0.008 285);
+  --color-fg-faint: oklch(0.455 0.008 285);
+  --color-fg-inverted: oklch(0.145 0.005 285);
+
+  /* ── Accent ──────────────────────────────────────────────────────────
+     One accent, used sparingly. A second accent colour is how a technical UI
+     starts looking like a consumer app. */
+  --color-accent: oklch(0.635 0.158 264);
+  --color-accent-hover: oklch(0.695 0.158 264);
+  --color-accent-muted: oklch(0.455 0.095 264);
+  --color-accent-surface: oklch(0.285 0.055 264);
+
+  /* ── Status ──────────────────────────────────────────────────────────── */
+  --color-success: oklch(0.715 0.145 152);
+  --color-success-surface: oklch(0.285 0.055 152);
+  --color-warning: oklch(0.775 0.135 78);
+  --color-warning-surface: oklch(0.295 0.055 78);
+  --color-danger: oklch(0.635 0.185 25);
+  --color-danger-surface: oklch(0.285 0.075 25);
+
+  /* ── Typography ──────────────────────────────────────────────────────
+     System stack. Shipping a webfont would add a network fetch or a megabyte
+     to the bundle to look marginally less native than the platform font. */
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Inter', 'Segoe UI', system-ui, sans-serif;
+  --font-mono:
+    'SF Mono', 'JetBrains Mono', 'Fira Code', ui-monospace, 'Menlo', monospace;
+
+  --text-2xs: 0.6875rem;
+  --text-xs: 0.75rem;
+  --text-sm: 0.8125rem;
+  --text-base: 0.875rem;
+  --text-lg: 1rem;
+  --text-xl: 1.125rem;
+  --text-2xl: 1.375rem;
+
+  /* ── Radii ───────────────────────────────────────────────────────────── */
+  --radius-xs: 3px;
+  --radius-sm: 5px;
+  --radius-md: 7px;
+  --radius-lg: 10px;
+  --radius-xl: 14px;
+
+  /* ── Motion ──────────────────────────────────────────────────────────
+     Short, and shorter for anything on the interaction path. A 300 ms hover is
+     the difference between an app that feels fast and one that feels considered
+     — and this product is meant to feel fast. */
+  --duration-instant: 80ms;
+  --duration-fast: 130ms;
+  --duration-normal: 190ms;
+  --duration-slow: 280ms;
+
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+
+  /* ── Elevation ───────────────────────────────────────────────────────
+     Dark-UI shadows need a visible border to read at all; the shadow alone
+     just darkens near-black against near-black. */
+  --shadow-overlay:
+    0 0 0 1px oklch(0.315 0.009 285), 0 12px 32px -8px oklch(0.08 0 0 / 0.7),
+    0 4px 12px -4px oklch(0.08 0 0 / 0.5);
+  --shadow-raised: 0 1px 3px oklch(0.08 0 0 / 0.4);
+
+  /* ── Layout ──────────────────────────────────────────────────────────── */
+  --spacing-sidebar: 236px;
+  --spacing-statusbar: 26px;
+  --spacing-titlebar: 38px;
+}

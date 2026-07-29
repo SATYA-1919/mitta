@@ -1,14 +1,17 @@
 # MITTA — single entry point for every development task.
 #
-# Phase 3 covers the Python sidecar only. Frontend and Tauri targets are added
-# in Phase 4, once the Rust toolchain is installed.
+# Covers the Python sidecar and the frontend. Tauri targets land in Phase 4b,
+# once the Rust toolchain is installed.
 
 PY      ?= .venv/bin/python
 CORE    := core
 VENV    := .venv
+UI      := apps/desktop
 
 .DEFAULT_GOAL := help
-.PHONY: help venv install test test-unit test-integration lint typecheck arch check run clean
+.PHONY: help venv install install-ui test test-unit test-integration lint typecheck arch \
+        check check-ui check-all run clean \
+        ui-dev ui-build ui-test ui-typecheck ui-budget gen-types
 
 help:  ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -44,7 +47,34 @@ typecheck:  ## mypy --strict
 arch:  ## Verify the layer dependency contracts (DEC-029)
 	cd $(CORE) && ../$(VENV)/bin/lint-imports --config importlinter.ini
 
-check: lint typecheck arch test  ## Everything CI runs
+check: lint typecheck arch test  ## Backend: everything CI runs
+
+# ── Frontend ───────────────────────────────────────────────────────────────
+
+install-ui:  ## Install frontend dependencies
+	cd $(UI) && npm install
+
+ui-dev:  ## Vite dev server
+	cd $(UI) && npm run dev
+
+ui-typecheck:  ## tsc --noEmit, strict
+	cd $(UI) && npx tsc --noEmit
+
+ui-test:  ## Vitest
+	cd $(UI) && npx vitest run
+
+ui-build:  ## Production bundles
+	cd $(UI) && npx vite build
+
+ui-budget: ui-build  ## Enforce the command palette's bundle budget (R2)
+	node scripts/check-palette-budget.mjs
+
+gen-types:  ## Regenerate frontend types from the Pydantic schemas (DEC-028)
+	./scripts/gen-types.sh
+
+check-ui: ui-typecheck ui-test ui-budget  ## Frontend: everything CI runs
+
+check-all: check check-ui  ## Both runtimes
 
 run:  ## Run the sidecar in dev mode against a scratch storage root
 	cd $(CORE) && MITTA_STORAGE_ROOT=$${MITTA_STORAGE_ROOT:-/tmp/mitta-dev} \

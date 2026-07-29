@@ -936,3 +936,128 @@ incremented rather than redrawn, so ids created in the same tick still sort in
 creation order. Without it, "the most recent message" is non-deterministic under
 load — a real hazard given ULID ordering is used as the sort key.
 
+---
+---
+
+# Phase 4a — Frontend Foundation
+
+---
+
+## DEC-041 — `procedural` retained as a seventh memory kind
+
+**Problem.** Phase 2 added a memory kind beyond the six in the original brief.
+Keep or drop, before real data makes it expensive.
+
+**Decision.** Keep. *(Delegated to the lead engineer.)*
+
+**Why.** "Learn my workflows" and "automate repetitive tasks" are stated product
+goals, and a learned workflow is structurally not a fact or an event — it is a
+trigger, a sequence of steps, and a success record. Folded into `long_term` it
+becomes a sentence describing a procedure rather than a procedure, and therefore
+cannot be retrieved *as* something to execute. The cost of keeping it is one
+value in a `CHECK` constraint; the cost of adding it later is a migration plus
+the reclassification of every memory that should have been one.
+
+---
+
+## DEC-042 — Phase 4 split: frontend now, Tauri shell deferred to 4b
+
+**Problem.** Phase 4 is "Frontend Foundation", but the Rust toolchain is not
+installed and the product owner is installing it themselves. Blocking the whole
+phase on it would have stalled work that has no Rust dependency at all.
+
+**Decision.** Split. **4a** is the React/TypeScript frontend, fully built and
+verified against Node 26. **4b** is the Tauri Rust shell.
+
+**Why.** The frontend genuinely does not need cargo — Vite, TypeScript, Vitest
+and Tailwind are the entire toolchain, and all four were available. Writing the
+Rust shell now without being able to compile it would have produced code that
+looks finished and has never been run, which is worse than no code: it invites
+review effort on something with an unknown error count.
+
+**How the boundary is kept honest.** `lib/ipc/tauri.ts` wraps every shell call
+and degrades to a documented fallback when the Tauri global is absent, so 4b
+plugs in with no changes above the wrapper. The fallbacks report absence as
+absence — `getPermissionsStatus` returns `unknown`, never a fabricated
+`granted`, because a fabricated success would make the onboarding flow
+untestable and would eventually ship.
+
+---
+
+## DEC-043 — TypeScript pinned to 5.x, not 7.x
+
+**Problem.** `npm install typescript` now resolves to 7.x, the native
+(Go) compiler. `openapi-typescript` crashed immediately against it:
+`Cannot read properties of undefined (reading 'createKeywordTypeNode')`.
+
+**Investigation.** The TypeScript 7 package exports only `./lib/version.cjs` as
+its main entry. The JavaScript compiler API — `ts.factory` and everything built
+on it — has moved behind `unstable/*` subpaths with a different shape. Every
+tool that generates or transforms TypeScript through that API is currently
+incompatible.
+
+**Decision.** Pin `typescript@^5.9`.
+
+**Why.** The type-generation boundary (DEC-028) is load-bearing: without it the
+Python and TypeScript definitions drift and the drift surfaces in production
+rather than CI. Trading a working codegen pipeline for compiler speed is the
+wrong side of that deal. Revisit when the ecosystem's API consumers have
+migrated.
+
+---
+
+## DEC-044 — Response schemas declare no defaults
+
+**Problem.** `components: list[ComponentStatus] = Field(default_factory=list)`
+generated `components?: ComponentStatus[] | undefined` in TypeScript, forcing
+every consumer to handle an `undefined` the server never sends.
+
+**Decision.** Response models declare required fields. Defaults belong on
+request models, where "the client may omit this" is the actual meaning.
+
+**Why.** A default on a response field is a statement about *construction*
+convenience that OpenAPI correctly reads as a statement about the *contract* —
+"this may be absent". The generated type is then permanently weaker than
+reality, and every call site pays with a `?? []` that can never fire. Caught by
+`tsc --noEmit`, which is the type boundary doing its job.
+
+---
+
+## DEC-045 — The palette's bundle budget is enforced in CI
+
+**Problem.** R2 requires the command palette to open in well under 100 ms.
+`PROJECT_STRUCTURE.md` §3.2 asserted this was "enforced by a bundle-size check
+in CI" — an assertion with no check behind it.
+
+**Decision.** `scripts/check-palette-budget.mjs`, run by `make ui-budget`. It
+asserts the palette entry chunk stays under 12 KB and contains no marker from
+the transport client, the state sync layer or the main window shell.
+
+**Why.** This is the difference between a documented constraint and an enforced
+one. A palette that imports the chat renderer loses the budget permanently, the
+regression is invisible in review, and by the time anyone measures it the
+offending import has three dependents. Current size is 2.2 KB, so the budget has
+substantial headroom rather than being set to whatever happens to pass today.
+
+---
+
+## DEC-046 — Streaming swap implemented as state, not as a component concern
+
+**Problem.** DEC-027 specifies streaming raw text and replacing it with the
+styled text in one atomic swap. Where does that live?
+
+**Decision.** In the store. `TurnState` holds `streamed` and `final`
+separately; `displayText()` returns `final ?? streamed`. The `turn.message`
+handler sets `final` — and when the server reports `styled: false`, it sets
+`final` to the *streamed* text rather than the payload, so no visible change
+occurs at all.
+
+**Why.** Keeping both strings means the swap is a single state transition rather
+than a mutation, so React re-renders once. It also keeps the pre-personality
+text available, which is what makes DEC-008's central claim auditable in the UI
+and not only in the database (`messages.content_raw`).
+
+The `styled: false` branch matters more than it looks: without it, a no-op
+rewrite still assigns `final`, and the user sees a flicker for a change that
+did not happen.
+

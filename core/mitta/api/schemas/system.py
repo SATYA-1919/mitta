@@ -35,7 +35,10 @@ class StatusResponse(Schema):
     platform: str
     storage_root: str
     uptime_seconds: float
-    components: list[ComponentStatus] = Field(default_factory=list)
+    # Required, not defaulted. A response field with a default is emitted as
+    # optional in OpenAPI, which forces every TypeScript consumer to handle an
+    # `undefined` the server never sends. Defaults belong on request models.
+    components: list[ComponentStatus]
 
 
 class CapabilitiesResponse(Schema):
@@ -49,4 +52,4 @@ class CapabilitiesResponse(Schema):
         default=False,
         description="False in v1 — both providers are cloud (R8, DEC-020).",
     )
-    providers: list[str] = Field(default_factory=list)
+    providers: list[str]

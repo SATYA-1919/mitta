@@ -35,6 +35,11 @@ apps/desktop/src-tauri/gen/
 node_modules/
 .vite/
 *.tsbuildinfo
+apps/desktop/dist/
+
+# Intermediate codegen artefact. The generated TypeScript IS committed (so the
+# frontend builds without a Python environment); this is just the step between.
+core/openapi.json
 
 # ── MITTA runtime data — user data, never committed ─────────────────────
 data/
