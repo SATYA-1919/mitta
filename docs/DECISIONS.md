@@ -2036,3 +2036,76 @@ needs the retry machinery the planner brings.
 Impact today is low: the search still returned the right answer, because a
 truncated query is usually still a usable one. It would matter for a path or a
 filename, which is one more reason no `WRITE` tool is offered yet.
+
+
+---
+
+## DEC-085 — Frames run as tasks, because a turn can wait for a human
+
+**The bug.** The approval prompt appeared, the user answered, and the connection
+died on a keepalive timeout. The turn was awaited **inline in the socket's read
+loop**, so while it waited for approval the loop could not call
+`receive_text` — and the approval it was waiting for was the next frame on that
+socket. A deadlock with the answer sitting one call away.
+
+**Decision.** Each frame is dispatched as its own task. The read loop stays free,
+so an approval arrives while the turn that needs it is still waiting.
+
+Tasks are held in a set (asyncio permits collecting a task with no strong
+reference, which cancels it silently) and cancelled on disconnect — a closed
+socket cannot deliver an approval, so anything still waiting would sit until its
+own timeout for nothing.
+
+This only became visible once a turn could block on a human. Everything before
+this completed on its own.
+
+---
+
+## DEC-086 — Tool results go back as `tool` messages, not as user text
+
+**The bug, and it is a good one.** Tool results were fed back as
+`ChatMessage(Role.USER, f"Result of {name}(...): {content}")`. The model learned
+the pattern and began **generating** it — replying, in prose, with:
+
+    Result of create_file({"filename": "ideas.md", ...}):
+    Created file ideas.md with the content...
+
+for a tool it had never called and that does not exist. A fabricated tool result
+in the answer, indistinguishable from a real one to anyone reading.
+
+**Decision.** The protocol shape: an assistant message carrying `tool_calls`,
+followed by `Role.TOOL` messages keyed by `tool_call_id`. Both providers
+implement it.
+
+**Why it matters beyond correctness.** Anything injected as user or assistant
+text is, to the model, an example of what to write. Structured roles exist so
+that results are *data* rather than *precedent*. The system prompt gained a
+matching rule — never claim an action unless a tool result shows it succeeded —
+but the prompt is a request and the message role is the mechanism.
+
+---
+
+## DEC-087 — Two bugs found by the approval path, both about honesty
+
+**Extraction crashed a live turn.** The extractor produced a `project`
+candidate; `project_id` is a foreign key it has no way to know; the validation
+error propagated out of extraction and closed the WebSocket — taking down a
+reply the user had already received. `project` is no longer extractable, and the
+per-candidate store is now guarded, so one malformed candidate costs that
+candidate. "Learning is best-effort" was documented and only half-implemented.
+
+**A silently dropped collaborator.** `Orchestrator(...)` was called
+positionally, a formatter rewrapped the line, and `broker` and `policy` stopped
+being passed. Nothing failed — `_can_ask()` simply returned false and MITTA
+quietly offered only read-only tools, then hallucinated having written the file.
+Now passed by keyword. Positional arguments on a constructor with six optional
+collaborators is an invitation to exactly this.
+
+**What worked, verified live:**
+
+    calls: write_note({"filename": "ideas.md", "content": "try faiss HNSW"})
+    ASKING: Write 14 characters (1 lines) to 'ideas.md' in your notes folder?
+      -> DENY      BLOCKED: denied by the user
+                   ANSWER: I cannot write files.
+      -> APPROVE   ran: ok=True · Saved ideas.md.
+                   file on disk: try faiss HNSW

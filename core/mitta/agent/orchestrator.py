@@ -19,6 +19,7 @@ import json
 import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
+from typing import Any
 
 from mitta.agent.context import AssembledContext, assemble
 from mitta.agent.extraction import MemoryExtractor
@@ -43,9 +44,11 @@ from mitta.llm.models import (
 )
 from mitta.memory.service import MemoryService
 from mitta.personality.rewriter import PersonalityLayer
-from mitta.policy.executor import ToolExecutor
+from mitta.policy.broker import ApprovalBroker
+from mitta.policy.engine import PolicyEngine
+from mitta.policy.executor import Execution, ToolExecutor
 from mitta.telemetry.logging import get_logger
-from mitta.tools.base import Risk
+from mitta.tools.base import Risk, ToolResult
 
 log = get_logger(__name__)
 
@@ -91,6 +94,8 @@ class Orchestrator:
         extractor: MemoryExtractor | None = None,
         personality: PersonalityLayer | None = None,
         tools: ToolExecutor | None = None,
+        broker: ApprovalBroker | None = None,
+        policy: PolicyEngine | None = None,
     ) -> None:
         self._conversations = conversations
         self._memory = memory
@@ -98,6 +103,8 @@ class Orchestrator:
         self._extractor = extractor
         self._personality = personality
         self._tools = tools
+        self._broker = broker
+        self._policy = policy
 
     async def run(
         self,
@@ -329,7 +336,9 @@ class Orchestrator:
         if not calls:
             return
 
-        collected: list[ChatMessage] = []
+        # The assistant's own tool_calls message has to precede the results, or
+        # the provider rejects the `tool` messages as unmatched.
+        collected: list[ChatMessage] = [ChatMessage(Role.ASSISTANT, "", tool_calls=calls)]
         for call in calls:
             function = call.get("function") or {}
             name = str(function.get("name") or "")
@@ -346,6 +355,15 @@ class Orchestrator:
             )
 
             execution = await self._tools.execute(name, arguments, turn_id=turn_id)
+
+            if execution.awaiting_approval:
+                async for event, resolved in self._ask_then_run(
+                    name, arguments, execution.prompt, turn_id
+                ):
+                    if event is not None:
+                        yield (event, [])
+                    if resolved is not None:
+                        execution = resolved
 
             yield (
                 TurnEvent(
@@ -364,12 +382,79 @@ class Orchestrator:
 
             collected.append(
                 ChatMessage(
-                    Role.USER,
-                    f"Result of {name}({json.dumps(arguments)}):\n{execution.result.content}",
+                    Role.TOOL,
+                    execution.result.content,
+                    tool_call_id=str(call.get("id") or ""),
                 )
             )
 
         yield (None, collected)
+
+    def _can_ask(self) -> bool:
+        return self._broker is not None and self._policy is not None
+
+    async def _ask_then_run(
+        self, name: str, params: dict[str, Any], prompt: str | None, turn_id: str
+    ) -> AsyncIterator[tuple[TurnEvent | None, Execution | None]]:
+        """Put the decision in front of the user and wait for it.
+
+        The turn stops here. Nothing has happened yet — the executor recorded a
+        `pending` invocation and returned without running the tool.
+        """
+        assert self._broker is not None and self._policy is not None
+        assert self._tools is not None
+
+        request = self._broker.open(
+            tool_name=name,
+            params=params,
+            prompt=prompt or f"Allow {name}?",
+            turn_id=turn_id,
+        )
+        yield (
+            TurnEvent(
+                "turn.approval_required",
+                {
+                    "request_id": request.id,
+                    "tool": name,
+                    # The concrete arguments, not a summary. The user is
+                    # approving these exact values, and the token binds to them.
+                    "params": params,
+                    "prompt": request.prompt,
+                },
+            ),
+            None,
+        )
+
+        outcome = await self._broker.wait(request.id)
+        if not outcome.approved or outcome.token is None:
+            yield (
+                TurnEvent("turn.tool_denied", {"tool": name, "reason": outcome.reason}),
+                None,
+            )
+            yield (
+                None,
+                Execution(
+                    invocation_id="",
+                    tool_name=name,
+                    params=params,
+                    result=ToolResult.failure(f"Not permitted: {outcome.reason}"),
+                ),
+            )
+            return
+
+        # Re-authorised from scratch with the token. The executor re-derives the
+        # parameter hash from the arguments about to be used, so an approval for
+        # different values fails here rather than being trusted.
+        yield (
+            None,
+            await self._tools.execute(
+                name,
+                params,
+                turn_id=turn_id,
+                approval_id=outcome.token["id"],
+                signature=outcome.token["signature"],
+            ),
+        )
 
     def _build_context(self, text: str, conversation_id: str) -> AssembledContext:
         # `touch=False`: a memory used to answer has genuinely been used, but

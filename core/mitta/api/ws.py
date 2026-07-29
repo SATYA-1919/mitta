@@ -19,8 +19,13 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from mitta.agent.orchestrator import Orchestrator
 from mitta.api.auth import SUBPROTOCOL, authenticate_websocket
 from mitta.conversations.models import InputKind
+from mitta.errors import NotFoundError
 from mitta.ids import MESSAGE, prefixed
+from mitta.policy.broker import ApprovalBroker, ApprovalOutcome
+from mitta.policy.engine import PolicyEngine
 from mitta.telemetry.logging import get_logger
+from mitta.tools.base import ToolSpec
+from mitta.tools.registry import ToolRegistry
 
 log = get_logger(__name__)
 
@@ -59,18 +64,36 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
     await websocket.accept(subprotocol=SUBPROTOCOL)
     log.info("ws.connected")
 
+    # Turns run as tasks, not inline.
+    #
+    # A turn can pause waiting for the user to approve a tool. Awaiting it here
+    # would stop this loop calling `receive_text`, so the approval the turn is
+    # waiting for could never be read — the connection deadlocked until the
+    # keepalive ping timed out, which is exactly how it was found.
+    running: set[asyncio.Task[None]] = set()
+
     try:
         while True:
             raw = await websocket.receive_text()
-            await _handle(websocket, orchestrator, raw)
+            task = asyncio.create_task(_guarded(websocket, _handle(websocket, orchestrator, raw)))
+            # Held so the task is not garbage-collected mid-flight, which
+            # asyncio permits and which cancels the turn silently.
+            running.add(task)
+            task.add_done_callback(running.discard)
     except WebSocketDisconnect:
         log.info("ws.disconnected")
     except Exception:
         log.exception("ws.failed")
         await websocket.close(code=1011)
+    finally:
+        # A closed socket cannot deliver an approval, so anything still waiting
+        # would sit until its own timeout for no reason.
+        for task in running:
+            task.cancel()
 
 
 async def _handle(websocket: WebSocket, orchestrator: Orchestrator | None, raw: str) -> None:
+    """Dispatch one frame. Runs as its own task; must not raise."""
     try:
         message = json.loads(raw)
     except json.JSONDecodeError:
@@ -92,6 +115,10 @@ async def _handle(websocket: WebSocket, orchestrator: Orchestrator | None, raw: 
         await websocket.send_text(_frame("pong", {}))
         return
 
+    if frame_type in ("turn.approve", "turn.deny"):
+        await _resolve_approval(websocket, frame_type == "turn.approve", data)
+        return
+
     if frame_type == "turn.start":
         await _run_turn(websocket, orchestrator, data)
         return
@@ -108,6 +135,60 @@ async def _handle(websocket: WebSocket, orchestrator: Orchestrator | None, raw: 
     await websocket.send_text(
         _frame("error", {"code": "validation.failed", "message": f"Unknown frame: {frame_type}"})
     )
+
+
+async def _guarded(websocket: WebSocket, coro: Any) -> None:
+    """Run a handler without letting a failure close the socket.
+
+    Each frame is now its own task, so an unhandled exception would be an
+    orphaned traceback rather than something the connection loop could report.
+    """
+    try:
+        await coro
+    except Exception:
+        log.exception("ws.frame_failed")
+
+
+async def _resolve_approval(websocket: WebSocket, approved: bool, data: dict[str, Any]) -> None:
+    """Deliver the user's decision to the turn waiting on it."""
+    broker: ApprovalBroker | None = websocket.app.state.approval_broker
+    policy: PolicyEngine | None = websocket.app.state.policy
+    request_id = str(data.get("request_id") or "")
+
+    if broker is None or policy is None or not request_id:
+        return
+
+    pending = next((r for r in broker.pending() if r.id == request_id), None)
+    if pending is None:
+        # A stale id is unremarkable: a duplicate click, or a prompt that timed
+        # out while the user was reading it. Acknowledged rather than errored.
+        await websocket.send_text(_frame("turn.approval_stale", {"request_id": request_id}))
+        return
+
+    spec = _spec_for(websocket, pending.tool_name)
+    if spec is None:
+        return
+
+    if approved:
+        # The token is minted here, from the parameters recorded when the
+        # prompt was raised — not from anything the client sent back. A client
+        # that returned altered parameters would get a token that fails
+        # verification against the arguments actually used.
+        token = policy.request_approval(spec, pending.params, turn_id=pending.turn_id)
+        broker.resolve(request_id, ApprovalOutcome(True, "approved", token))
+    else:
+        policy.deny(spec, pending.params, turn_id=pending.turn_id)
+        broker.resolve(request_id, ApprovalOutcome(False, "denied by the user"))
+
+
+def _spec_for(websocket: WebSocket, tool_name: str) -> ToolSpec | None:
+    registry: ToolRegistry | None = websocket.app.state.tool_registry
+    if registry is None:
+        return None
+    try:
+        return registry.get(tool_name).spec
+    except NotFoundError:
+        return None
 
 
 async def _run_turn(

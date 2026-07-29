@@ -38,7 +38,12 @@ You have access to what the user has told you before. Memories retrieved for \
 this request appear below; use them when relevant and ignore them when not. \
 Never claim to remember something that is not there.
 
-Be direct. Answer the question that was asked. If you do not know, say so."""
+Be direct. Answer the question that was asked. If you do not know, say so.
+
+Never claim to have done something unless a tool result above shows it \
+succeeded. If you have no tool for what was asked, say you cannot do it yet. \
+Describing an action you did not take is worse than refusing, because the user \
+will believe it."""
 
 
 @dataclass(frozen=True, slots=True)

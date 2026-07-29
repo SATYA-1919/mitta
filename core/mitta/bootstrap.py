@@ -49,12 +49,14 @@ from mitta.persistence.migrations import migrate
 from mitta.personality.rewriter import PersonalityLayer
 from mitta.policy.approval import ApprovalAuthority
 from mitta.policy.audit import AuditLog
+from mitta.policy.broker import ApprovalBroker
 from mitta.policy.engine import PolicyEngine
 from mitta.policy.executor import ToolExecutor
 from mitta.telemetry.logging import get_logger, setup_logging
 from mitta.telemetry.redaction import SecretRedactor
 from mitta.tools.builtin.open_app import OpenAppTool
 from mitta.tools.builtin.web_search import WebSearchTool
+from mitta.tools.builtin.write_note import WriteNoteTool
 from mitta.tools.registry import ToolRegistry
 
 log = get_logger(__name__)
@@ -183,9 +185,20 @@ def build_runtime(
     # `mitta.os_adapter`, and that contract is what keeps platform access behind
     # the policy engine (DEC-079).
     registry.register(OpenAppTool(os_adapter.open_application))
+    registry.register(WriteNoteTool(paths.storage_root / "notes"))
     tools = ToolExecutor(registry, policy, database)
+    broker = ApprovalBroker()
 
-    orchestrator = Orchestrator(conversations, memory, gateway, extractor, personality, tools)
+    orchestrator = Orchestrator(
+        conversations,
+        memory,
+        gateway,
+        extractor=extractor,
+        personality=personality,
+        tools=tools,
+        broker=broker,
+        policy=policy,
+    )
 
     app = create_app(
         settings=settings,
@@ -198,6 +211,9 @@ def build_runtime(
         gateway=gateway,
         conversations=conversations,
         orchestrator=orchestrator,
+        approval_broker=broker,
+        policy=policy,
+        tool_registry=registry,
     )
 
     return Runtime(

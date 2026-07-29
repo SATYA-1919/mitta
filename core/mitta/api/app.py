@@ -35,7 +35,10 @@ from mitta.memory.indexer import Indexer
 from mitta.memory.service import MemoryService
 from mitta.os_adapter.base import OSAdapter
 from mitta.persistence.database import Database
+from mitta.policy.broker import ApprovalBroker
+from mitta.policy.engine import PolicyEngine
 from mitta.telemetry.logging import get_logger
+from mitta.tools.registry import ToolRegistry
 
 API_VERSION = "1"
 
@@ -54,6 +57,9 @@ def create_app(
     gateway: LLMGateway | None = None,
     conversations: ConversationRepository | None = None,
     orchestrator: Orchestrator | None = None,
+    approval_broker: ApprovalBroker | None = None,
+    policy: PolicyEngine | None = None,
+    tool_registry: ToolRegistry | None = None,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -71,6 +77,10 @@ def create_app(
         finally:
             if indexer is not None:
                 indexer.stop()
+            # Release any turn waiting on a human, or the loop stays alive
+            # past the point the process was asked to stop.
+            if approval_broker is not None:
+                approval_broker.cancel_all("MITTA is shutting down")
             log.info("api.shutdown")
 
     app = FastAPI(
@@ -94,6 +104,9 @@ def create_app(
     app.state.gateway = gateway
     app.state.conversations = conversations
     app.state.orchestrator = orchestrator
+    app.state.approval_broker = approval_broker
+    app.state.policy = policy
+    app.state.tool_registry = tool_registry
     app.state.api_version = API_VERSION
     app.state.started_at = time.monotonic()
     app.state.token_verifier = TokenVerifier(

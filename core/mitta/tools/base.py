@@ -15,6 +15,7 @@ the policy engine, so bypassing permission means editing the composition root
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, Protocol, runtime_checkable
@@ -42,6 +43,10 @@ class ToolSpec:
     risk: Risk
     #: JSON Schema for the arguments, handed to the model for tool calling.
     parameters: dict[str, Any] = field(default_factory=dict)
+    #: Optional purpose-written confirmation sentence. A tool that can say
+    #: "Write 412 characters to 'ideas.md'?" should, because a prompt nobody
+    #: reads is a prompt that approves everything.
+    describer: Callable[[dict[str, Any]], str] | None = None
 
     def describe(self, params: dict[str, Any]) -> str:
         """The confirmation prompt.
@@ -51,6 +56,8 @@ class ToolSpec:
         sentence and far better than "perform an action" — a prompt nobody reads
         is a prompt that approves everything.
         """
+        if self.describer is not None:
+            return self.describer(params)
         rendered = ", ".join(f"{k}={v!r}" for k, v in sorted(params.items()))
         return f"Run {self.name}({rendered})?"
 

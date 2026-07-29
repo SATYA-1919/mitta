@@ -49,12 +49,12 @@ MIN_CONFIDENCE: Final = 0.7
 #: confirmed by use (DEC-053).
 EXTRACTED_IMPORTANCE: Final = 0.55
 
-#: Only these kinds are extractable. `episodic` and `relationship` need
-#: structure — a timestamp, a person id — that free-form extraction cannot
-#: supply reliably, and a half-populated record is worse than none.
-EXTRACTABLE: Final = frozenset(
-    {MemoryKind.LONG_TERM, MemoryKind.PREFERENCE, MemoryKind.PROJECT, MemoryKind.PROCEDURAL}
-)
+#: Only these kinds are extractable. The excluded three all need structure that
+#: free-form extraction cannot supply: `episodic` a timestamp, `relationship` a
+#: person id, and `project` a project_id — which is a foreign key, so a
+#: `project` candidate could never be stored at all. A half-populated record is
+#: worse than none, and one that violates a constraint is worse still.
+EXTRACTABLE: Final = frozenset({MemoryKind.LONG_TERM, MemoryKind.PREFERENCE, MemoryKind.PROCEDURAL})
 
 #: Anything matching is dropped without appeal. Deliberately broader than the
 #: redactor's list: this decides what is written to a database that persists for
@@ -273,6 +273,7 @@ class MemoryExtractor:
         sensitive = 0
         low_confidence = 0
         duplicates = 0
+        malformed = 0
 
         for candidate in candidates:
             if looks_sensitive(candidate.content):
@@ -295,24 +296,34 @@ class MemoryExtractor:
                 continue
 
             before = self._memory.count(status=None)
-            memory = self._memory.remember(
-                MemoryDraft(
-                    kind=candidate.kind,
-                    content=candidate.content,
-                    importance=EXTRACTED_IMPORTANCE,
-                    confidence=candidate.confidence,
-                    # `conversation`: this was inferred from what was said, not
-                    # asserted by the user. The distinction is what lets them
-                    # judge a memory they do not recognise.
-                    source_kind=SourceKind.CONVERSATION,
+            try:
+                memory = self._memory.remember(
+                    MemoryDraft(
+                        kind=candidate.kind,
+                        content=candidate.content,
+                        importance=EXTRACTED_IMPORTANCE,
+                        confidence=candidate.confidence,
+                        # `conversation`: this was inferred from what was said,
+                        # not asserted by the user. The distinction is what lets
+                        # them judge a memory they do not recognise.
+                        source_kind=SourceKind.CONVERSATION,
+                    )
                 )
-            )
+            except Exception:
+                # One malformed candidate costs that candidate. It previously
+                # cost the whole turn — a validation error propagated out of
+                # extraction and closed the WebSocket, taking down a reply the
+                # user had already received.
+                log.warning("extraction.candidate_rejected", exc_info=True)
+                malformed += 1
+                continue
+
             if self._memory.count(status=None) > before:
                 stored.append(memory.id)
             else:
                 duplicates += 1
 
-        if stored or sensitive:
+        if stored or sensitive or malformed:
             log.info(
                 "extraction.complete",
                 extra={
@@ -320,6 +331,7 @@ class MemoryExtractor:
                     "duplicates": duplicates,
                     "rejected_sensitive": sensitive,
                     "rejected_low_confidence": low_confidence,
+                    "rejected_malformed": malformed,
                 },
             )
         return ExtractionResult(stored, sensitive, low_confidence, duplicates)

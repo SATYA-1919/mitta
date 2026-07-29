@@ -340,3 +340,48 @@ class TestConfidenceCoercion:
         candidates = parse_candidates(raw)
         assert len(candidates) == 1
         assert candidates[0].confidence == 0.9
+
+
+class TestBestEffortStorage:
+    """Learning must never take down a turn that already answered.
+
+    A `project` candidate crashed the WebSocket in a live run: `project_id` is a
+    foreign key, the extractor has no way to know one, and the validation error
+    propagated out of extraction and closed the connection.
+    """
+
+    def test_project_is_not_extractable(self) -> None:
+        # It needs a project_id, so a `project` candidate could never be stored.
+        assert MemoryKind.PROJECT not in EXTRACTABLE
+        assert parse_candidates(reply({"content": "x", "kind": "project", "confidence": 1.0})) == []
+
+    async def test_a_candidate_the_store_rejects_does_not_abort_the_rest(
+        self, memory_service: MemoryService
+    ) -> None:
+        class HostileService:
+            def __init__(self, real: MemoryService) -> None:
+                self._real = real
+                self.calls = 0
+
+            def count(self, **kw: object) -> int:
+                return self._real.count(**kw)  # type: ignore[arg-type]
+
+            def remember(self, draft: object) -> object:
+                self.calls += 1
+                if self.calls == 1:
+                    raise ValueError("constraint violated")
+                return self._real.remember(draft)  # type: ignore[arg-type]
+
+        hostile = HostileService(memory_service)
+        gateway = FakeGateway(
+            reply(
+                {"content": "first, which fails", "kind": "long_term", "confidence": 0.9},
+                {"content": "second, which works", "kind": "long_term", "confidence": 0.9},
+            )
+        )
+        extractor = MemoryExtractor(hostile, gateway)  # type: ignore[arg-type]
+
+        result = await extractor.extract(EXCHANGE)
+
+        assert result.learned == 1
+        assert memory_service.count() == 1
