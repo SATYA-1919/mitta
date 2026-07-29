@@ -20,6 +20,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 
 from mitta.agent.context import AssembledContext, assemble
+from mitta.agent.extraction import MemoryExtractor
 from mitta.conversations.models import (
     ConversationDraft,
     InputKind,
@@ -75,10 +76,12 @@ class Orchestrator:
         conversations: ConversationRepository,
         memory: MemoryService,
         gateway: LLMGateway,
+        extractor: MemoryExtractor | None = None,
     ) -> None:
         self._conversations = conversations
         self._memory = memory
         self._gateway = gateway
+        self._extractor = extractor
 
     async def run(
         self,
@@ -220,6 +223,16 @@ class Orchestrator:
             ),
         )
 
+        # Learn from the exchange — after the reply, never before. Extraction is
+        # a second model call, and making the user wait for MITTA to take notes
+        # would trade the thing they asked for against a thing they did not.
+        learned: list[str] = []
+        if self._extractor is not None and failure is None and answer:
+            result = await self._extractor.extract(self._conversations.turn_messages(turn.id))
+            learned = result.stored
+            if learned:
+                yield TurnEvent("memory.learned", {"memory_ids": learned, "count": len(learned)})
+
         yield TurnEvent(
             "turn.done",
             {
@@ -228,6 +241,7 @@ class Orchestrator:
                 "message_id": message_id,
                 "latency_ms": latency_ms,
                 "failed": failure is not None,
+                "learned": len(learned),
             },
         )
 

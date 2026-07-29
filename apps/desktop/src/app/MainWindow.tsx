@@ -1,10 +1,11 @@
 import { useEffect } from 'react';
 
+import { ChatSurface } from '@/components/chat/ChatSurface';
 import { Sidebar, SURFACES } from '@/components/layout/Sidebar';
-import { MemorySurface } from '@/components/memory/MemorySurface';
 import { StatusBar } from '@/components/layout/StatusBar';
-import { EmptyState, Panel } from '@/components/ui/primitives';
-import { displayText, useStore } from '@/state/store';
+import { MemorySurface } from '@/components/memory/MemorySurface';
+import { EmptyState } from '@/components/ui/primitives';
+import { useStore } from '@/state/store';
 
 /**
  * Persistent main window — the Cursor/Linear-shaped surface.
@@ -57,33 +58,6 @@ export function MainWindow() {
   );
 }
 
-function ChatSurface() {
-  const turn = useStore((s) => s.activeTurn);
-  const text = displayText(turn);
-
-  if (turn === null) {
-    return <EmptyState title="No active turn" hint="Press ⌘K to open the command palette" />;
-  }
-
-  return (
-    <div className="mx-auto max-w-3xl p-6">
-      <Panel className="p-4">
-        <div className="mb-2 flex items-center gap-2 text-2xs text-fg-faint">
-          <span className="font-mono">{turn.turnId}</span>
-          {turn.register !== null && (
-            <span className="rounded-xs bg-surface-input px-1.5 py-0.5">{turn.register}</span>
-          )}
-          {/* Visible so a long reply is explicable rather than surprising
-              (DEC-033) — the register is why, and the user can see it. */}
-        </div>
-        <p className="selectable whitespace-pre-wrap text-sm leading-relaxed text-fg-primary">
-          {text}
-        </p>
-        {turn.error !== null && <p className="mt-3 text-xs text-danger">{turn.error}</p>}
-      </Panel>
-    </div>
-  );
-}
 
 function PendingSurface({ name }: { name: string }) {
   return <EmptyState title={`${name} is not built yet`} hint="Lands in a later phase" />;

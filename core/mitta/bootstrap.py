@@ -25,6 +25,7 @@ from typing import Any
 
 from fastapi import FastAPI
 
+from mitta.agent.extraction import MemoryExtractor
 from mitta.agent.orchestrator import Orchestrator
 from mitta.api.app import create_app
 from mitta.config.paths import Paths, resolve_paths
@@ -154,7 +155,8 @@ def build_runtime(
         },
     )
 
-    orchestrator = Orchestrator(conversations, memory, gateway)
+    extractor = MemoryExtractor(memory, gateway, redactor=redactor)
+    orchestrator = Orchestrator(conversations, memory, gateway, extractor)
 
     app = create_app(
         settings=settings,

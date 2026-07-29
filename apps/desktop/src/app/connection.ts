@@ -65,6 +65,7 @@ export async function connect(): Promise<Connection | null> {
   // Server-owned state gets its own store fed by the same client, rather than
   // a second client with its own token handling (DEC-018).
   useMemoryStore.getState().attach(api);
+  useStore.getState().attachChat(api, transport);
 
   return {
     api,
@@ -73,6 +74,7 @@ export async function connect(): Promise<Connection | null> {
       unbind();
       unlistenMetrics();
       useMemoryStore.getState().attach(null);
+      useStore.getState().attachChat(null, null);
       transport.close();
     },
   };

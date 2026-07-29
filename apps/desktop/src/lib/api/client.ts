@@ -24,6 +24,11 @@ export type UpdateMemoryRequest = components['schemas']['UpdateMemoryRequest'];
 export type SearchRequest = components['schemas']['SearchRequest'];
 export type SweepResponse = components['schemas']['SweepResponse'];
 
+export type Conversation = components['schemas']['ConversationResource'];
+export type Message = components['schemas']['MessageResource'];
+export type ConversationList = components['schemas']['ConversationListResponse'];
+export type MessageList = components['schemas']['MessageListResponse'];
+
 export interface ListMemoriesParams {
   kind?: MemoryKind;
   projectId?: string;
@@ -209,6 +214,28 @@ export class ApiClient {
 
   reindexMemories(): Promise<MemoryStats> {
     return this.post<MemoryStats>('/v1/memory/maintenance/reindex');
+  }
+
+  // -- conversations --------------------------------------------------------
+
+  listConversations(limit = 50): Promise<ConversationList> {
+    return this.get<ConversationList>(`/v1/conversations?limit=${limit}`);
+  }
+
+  conversationMessages(id: string, limit = 200): Promise<MessageList> {
+    return this.get<MessageList>(
+      `/v1/conversations/${encodeURIComponent(id)}/messages?limit=${limit}`,
+    );
+  }
+
+  createConversation(title?: string): Promise<Conversation> {
+    return this.post<Conversation>('/v1/conversations', title === undefined ? {} : { title });
+  }
+
+  deleteConversation(id: string): Promise<void> {
+    return this.request<void>(`/v1/conversations/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    });
   }
 }
 

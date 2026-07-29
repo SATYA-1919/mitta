@@ -1723,3 +1723,72 @@ Recording access properly needs attribution — knowing which memory actually
 contributed to an answer — and nothing in the current pipeline can establish
 that. Under-counting is the safe direction: it makes memories decay slightly
 faster than ideal, and decay only demotes.
+
+
+---
+
+## DEC-074 — MITTA learns from conversation, with three hard limits
+
+**Decision.** After a turn completes, the exchange goes to a cheap model that
+extracts durable facts, and those become memories. Telling MITTA something once
+should be enough.
+
+`Satya_Personal_Profile.pdf` sets the boundaries, and they are enforced in code
+rather than in a prompt:
+
+1. **Credentials are never stored.** `looks_sensitive` rejects a candidate on
+   key shapes, credential vocabulary (`password`, `api key`, `aadhaar`,
+   `passport`, `cvv`), and long digit runs. It also runs the candidate through
+   the live `SecretRedactor`, which catches the session token — a value with no
+   recognisable shape that only a registered literal can match. Verified against
+   the real model: a pasted key produced `learned 0` and appears zero times in
+   the database.
+2. **Guesses are discarded.** Confidence below 0.7 is dropped. A wrong memory is
+   worse than a missing one — it gets recalled confidently and quietly corrupts
+   later answers.
+3. **Only four kinds are extractable.** `episodic` needs a timestamp and
+   `relationship` a person id; free-form extraction cannot supply either, and a
+   half-populated record is worse than none.
+
+**Extraction runs after the reply, never before.** It is a second model call,
+and making the user wait for MITTA to take notes would trade the thing they
+asked for against a thing they did not. A provider outage during extraction
+leaves the turn successful — learning is best-effort by construction.
+
+**Extracted memories start at importance 0.55**, below stated ones. They were
+inferred rather than asserted, so they should decay faster if never confirmed by
+use. `source_kind` is `conversation`, which is what lets the user judge a memory
+they do not recognise.
+
+Tool output is never sent to the extractor. It is machine text, and it is where
+credentials and file contents actually appear.
+
+---
+
+## DEC-075 — Confidence is coerced, not required to be a number
+
+**The bug.** Extraction returned nothing from a conversation that plainly
+contained a durable preference. The model had replied:
+
+    {"memories": [{"content": "The user prefers uv over pip for Python
+     projects.", "kind": "preference", "confidence": "high"}]}
+
+A correct extraction. The parser required `confidence` to be a number, so it
+dropped the entry — **silently**, because an empty candidate list is
+indistinguishable from "nothing worth learning". Thirty-three unit tests passed;
+one of them actively asserted that `"high"` should be rejected, encoding the bug
+as a requirement.
+
+**Decision.** `_confidence` accepts numbers, numeric strings, percentages, and
+the words models actually use (`high`, `medium`, `low`, `certain`). The prompt
+now says "a NUMBER between 0 and 1, not a word" — but the prompt is a request,
+and the parser is what holds.
+
+`True` is still rejected explicitly: it is an `int` in Python and would
+otherwise read as full confidence.
+
+**The general lesson.** Strictness at a boundary you do not control is not
+safety — it is data loss with no error message. Strict parsing belongs where a
+mistake should stop the system; a model's JSON is not that place, because the
+model will be wrong in a new way next week and the correct response is to keep
+the turn working.

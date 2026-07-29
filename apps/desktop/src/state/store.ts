@@ -18,9 +18,9 @@
 
 import { create } from 'zustand';
 
-import type { ComponentStatus } from '@/lib/api/client';
+import type { ApiClient, ComponentStatus, Message } from '@/lib/api/client';
 import type { SystemMetrics } from '@/lib/ipc/tauri';
-import type { ConnectionState } from '@/lib/transport/socket';
+import type { ConnectionState, TransportClient } from '@/lib/transport/socket';
 
 export type Surface =
   | 'chat'
@@ -37,6 +37,11 @@ export type ThinkingPhase = 'retrieving' | 'planning' | 'reasoning' | 'executing
 export type Register = 'playful' | 'serious';
 
 export interface TurnState {
+  /** Memory ids the server reported using. Surfaced so the working set that
+   *  left the machine is inspectable (R5). */
+  memoryIds: string[];
+  provider: string | null;
+  modelId: string | null;
   turnId: string;
   conversationId: string;
   /** Streamed, pre-personality text (API_DESIGN.md §4.5). */
@@ -75,6 +80,26 @@ export interface UiSlice {
 
 export interface TurnSlice {
   activeTurn: TurnState | null;
+
+  // -- chat --------------------------------------------------------------- //
+  api: ApiClient | null;
+  transport: TransportClient | null;
+  conversationId: string | null;
+  messages: Message[];
+  draft: string;
+  /** Held between `send` and `turn.accepted`, when the local echo is rendered.
+   *  The draft clears immediately so the input feels responsive. */
+  pendingText: string;
+  chatError: string | null;
+
+  attachChat: (api: ApiClient | null, transport: TransportClient | null) => void;
+  setDraft: (draft: string) => void;
+  send: () => boolean;
+  newConversation: () => void;
+  openConversation: (conversationId: string) => Promise<void>;
+  setTurnContext: (memoryIds: string[]) => void;
+  setTurnProvenance: (provider: string | null, modelId: string | null) => void;
+
   beginTurn: (turnId: string, conversationId: string) => void;
   setPhase: (phase: ThinkingPhase) => void;
   appendDelta: (text: string) => void;
@@ -85,7 +110,7 @@ export interface TurnSlice {
 
 export type AppState = ConnectionSlice & MetricsSlice & UiSlice & TurnSlice;
 
-export const useStore = create<AppState>((set) => ({
+export const useStore = create<AppState>((set, get) => ({
   // -- connection ----------------------------------------------------------
   connection: 'idle',
   connectionDetail: null,
@@ -110,8 +135,75 @@ export const useStore = create<AppState>((set) => ({
 
   // -- turn ----------------------------------------------------------------
   activeTurn: null,
+
+  api: null,
+  transport: null,
+  conversationId: null,
+  messages: [],
+  draft: '',
+  pendingText: '',
+  chatError: null,
+
+  attachChat: (api, transport) => set({ api, transport }),
+  setDraft: (draft) => set({ draft }),
+
+  send: () => {
+    const state = get();
+    const text = state.draft.trim();
+    if (text.length === 0 || state.transport === null) return false;
+    // One turn at a time. The sidecar would accept a second, but two streams
+    // into one buffer would interleave into nonsense.
+    if (state.activeTurn !== null && state.activeTurn.status === 'running') return false;
+
+    const sent = state.transport.send('turn.start', {
+      text,
+      ...(state.conversationId === null ? {} : { conversation_id: state.conversationId }),
+    });
+    if (!sent) {
+      set({ chatError: 'Not connected to MITTA.' });
+      return false;
+    }
+    set({ draft: '', pendingText: text, chatError: null });
+    return true;
+  },
+
+  newConversation: () =>
+    // No server round-trip: the orchestrator creates a conversation when a turn
+    // arrives without one. Creating it here would leave an empty thread behind
+    // every time someone clicked "new" and changed their mind.
+    set({ conversationId: null, messages: [], activeTurn: null, chatError: null }),
+
+  openConversation: async (conversationId) => {
+    const { api } = get();
+    if (api === null) return;
+    set({ conversationId, activeTurn: null, chatError: null });
+    try {
+      const body = await api.conversationMessages(conversationId);
+      set({ messages: body.messages });
+    } catch (error) {
+      set({ chatError: String(error) });
+    }
+  },
+
+  setTurnContext: (memoryIds) =>
+    set((s) => (s.activeTurn === null ? s : { activeTurn: { ...s.activeTurn, memoryIds } })),
+
+  setTurnProvenance: (provider, modelId) =>
+    set((s) =>
+      s.activeTurn === null ? s : { activeTurn: { ...s.activeTurn, provider, modelId } },
+    ),
+
   beginTurn: (turnId, conversationId) =>
-    set({
+    set((s) => ({
+      conversationId,
+      pendingText: '',
+      // The user's message is echoed locally rather than waiting for a reload.
+      // Seeing your own sentence appear instantly is most of what makes a chat
+      // feel responsive; the persisted row replaces it on the next load.
+      messages:
+        s.pendingText.length > 0
+          ? [...s.messages, localUserMessage(s.pendingText, turnId, conversationId)]
+          : s.messages,
       activeTurn: {
         turnId,
         conversationId,
@@ -121,8 +213,11 @@ export const useStore = create<AppState>((set) => ({
         phase: null,
         status: 'running',
         error: null,
+        memoryIds: [],
+        provider: null,
+        modelId: null,
       },
-    }),
+    })),
   setPhase: (phase) =>
     set((s) => (s.activeTurn === null ? s : { activeTurn: { ...s.activeTurn, phase } })),
   appendDelta: (text) =>
@@ -152,4 +247,27 @@ export const useStore = create<AppState>((set) => ({
 export function displayText(turn: TurnState | null): string {
   if (turn === null) return '';
   return turn.final ?? turn.streamed;
+}
+
+/**
+ * The user's message, rendered before the server has confirmed it.
+ *
+ * Given a `local_` id so it is distinguishable from a persisted row — on reload
+ * the real one arrives with a `msg_` id and full provenance.
+ */
+function localUserMessage(content: string, turnId: string, conversationId: string): Message {
+  return {
+    id: `local_${turnId}`,
+    conversation_id: conversationId,
+    turn_id: turnId,
+    role: 'user',
+    content,
+    content_raw: null,
+    model_id: null,
+    provider: null,
+    register: null,
+    styled: false,
+    latency_ms: null,
+    created_at: Math.floor(Date.now() / 1000),
+  };
 }

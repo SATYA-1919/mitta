@@ -27,6 +27,11 @@ interface MessageData {
   content: string;
   styled: boolean;
   register: Register | null;
+  provider?: string | null;
+  model_id?: string | null;
+}
+interface ContextData {
+  memory_ids: string[];
 }
 interface ErrorData {
   code: string;
@@ -59,6 +64,12 @@ export function bindTransport(
         state.setPhase((frame.data as ThinkingData).phase);
         break;
       }
+      case 'turn.context': {
+        // The working set that left the machine on the user's behalf. Shown in
+        // the UI rather than only logged — R5's enforcement clause.
+        state.setTurnContext((frame.data as ContextData).memory_ids ?? []);
+        break;
+      }
       case 'turn.delta': {
         state.appendDelta((frame.data as DeltaData).text);
         break;
@@ -68,6 +79,7 @@ export function bindTransport(
         // buffer in one swap. `styled: false` means the rewrite was a no-op, so
         // there is nothing to swap and the stream is already correct.
         const data = frame.data as MessageData;
+        state.setTurnProvenance(data.provider ?? null, data.model_id ?? null);
         if (data.styled) {
           state.settleTurn(data.content, data.register);
         } else {
