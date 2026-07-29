@@ -1,0 +1,52 @@
+# ── Secrets ─────────────────────────────────────────────────────────────
+# Keys belong in the macOS Keychain (DEC-017). These patterns are a net,
+# not a strategy — nothing here should ever exist in the first place.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.mobileprovision
+secrets.json
+credentials.json
+**/config/local.json
+
+# ── Python ──────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.so
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+dist/
+build/
+*.egg-info/
+*.spec.bak
+
+# ── Rust / Tauri ────────────────────────────────────────────────────────
+target/
+apps/desktop/src-tauri/target/
+apps/desktop/src-tauri/gen/
+
+# ── Node / frontend ─────────────────────────────────────────────────────
+node_modules/
+.vite/
+*.tsbuildinfo
+
+# ── MITTA runtime data — user data, never committed ─────────────────────
+data/
+*.db
+*.db-wal
+*.db-shm
+vectors/
+models/
+logs/
+screenshots/
+voice_cache/
+.mitta-runtime
+
+# ── macOS ───────────────────────────────────────────────────────────────
+.DS_Store
