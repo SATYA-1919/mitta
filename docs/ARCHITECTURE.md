@@ -418,7 +418,9 @@ anything matching a key pattern.
 
 ## 12. Repository Shape
 
-Detailed structure is Phase 2. The top level:
+**Superseded by `PROJECT_STRUCTURE.md` (Phase 2), which is now canonical for
+layout.** The API contract is in `API_DESIGN.md` and the schema in
+`DATABASE_DESIGN.md`. The top level, for orientation:
 
 ```
 mitta/

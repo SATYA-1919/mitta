@@ -397,3 +397,353 @@ retrofit cheap.
 **Trade-off accepted.** No reasoning without a network in v1. Memory, retrieval,
 semantic search and the UI all still work offline.
 
+---
+---
+
+# Phase 2 — Structure, API, Database
+
+---
+
+## DEC-021 — Repository layout: monorepo grouped by runtime
+
+**Problem.** The original brief specified a flat layout (`frontend/`,
+`backend/`, `voice/`, `memory/`, `planner/`, `llm/`, …). `ARCHITECTURE.md` §12
+sketched a monorepo grouped by runtime. Both were on the table and they are
+incompatible.
+
+**Options.** (a) Monorepo grouped by runtime — `apps/desktop/`, `core/`.
+(b) Flat layout exactly as briefed. (c) Hybrid — the brief's vocabulary, nested
+under each runtime.
+
+**Decision.** (a). *(Product owner decision.)*
+
+**Why.** The process boundary is the only boundary macOS actually enforces.
+Making it the folder boundary too means a cross-runtime import cannot resolve at
+all, rather than being caught by review. Option (b) also splits one Python
+package across eight sibling roots, which costs a namespace-package arrangement,
+an ambiguous import graph, eight PyInstaller spec entries and non-trivial pytest
+collection config — recurring friction for a one-time gain in file-manager
+tidiness.
+
+**Trade-off accepted.** The top level is less immediately self-describing than
+the brief's flat list. `PROJECT_STRUCTURE.md` §2 carries the map.
+
+---
+
+## DEC-022 — Cloud reasoning confirmed; embeddings remain local
+
+**Confirms DEC-006, DEC-015, DEC-020 and R8. Resolves the ambiguity in the
+instruction "the LLM models will be completely cloud".**
+
+**Problem.** "Completely cloud" has two readings: reasoning models only, or
+every model including the embedding model. They produce materially different
+architectures.
+
+**Options.** (a) Reasoning cloud-only; embeddings stay local. (b) Everything
+cloud, embeddings included. (c) Local default with a cloud embedding adapter
+behind the same interface.
+
+**Decision.** (a). *(Product owner decision.)*
+
+**Why.** Option (b) would have made every memory write a network round-trip
+carrying user content off-machine, which is not a performance trade-off — it
+directly contradicts R5's "the memory database must never be uploaded". Sending
+text to an embedding API *is* uploading memory content, whatever the endpoint is
+called. Choosing (a) keeps R5 enforceable at the DEC-016 chokepoint and keeps
+semantic search working with no network.
+
+**Consequence.** Nothing from Phase 1 changes. Groq and OpenRouter serve
+reasoning; `bge-small-en-v1.5` runs on-device via ONNX Runtime; v1 still has no
+offline reasoning, exactly as R8 states.
+
+---
+
+## DEC-023 — One `memories` table with a `kind` discriminator
+
+**Problem.** Six memory stores (`ARCHITECTURE.md` §5). One table or six?
+
+**Options.** (a) Six tables, one per store. (b) One table with a `kind`
+discriminator plus a validated JSON `attributes` column. (c) One table plus
+narrow satellite tables per kind.
+
+**Decision.** (b), with two deliberate exceptions.
+
+**Why.** Semantic retrieval must span all stores. With six tables every
+retrieval becomes a six-way `UNION` with six FAISS id spaces, six scoring paths
+and six re-index jobs. One table gives one index, one id space feeding FAISS, one
+decay calculation and one deduplication query. Kind-specific fields are genuinely
+sparse, which is what JSON columns are for.
+
+**The two exceptions, and why they are not inconsistent.** `people` and
+`episodes` stay separate because they are not facts. A person is an *entity with
+identity* — without a canonical row, two memories naming the same person are two
+unrelated strings and cannot be merged or renamed. An episode is an *event on a
+timeline*, queried by time range; as memory rows, timeline queries would scan and
+JSON-extract across the entire memory table. `preferences` is likewise separate
+from `kind='preference'` memories: settings code reads it by key and must be
+deterministic, while narrative preferences are for semantic recall. Routing a
+theme lookup through vector search would be both slow and non-deterministic.
+
+**Trade-off accepted.** `attributes` is schemaless at the database level.
+Mitigated by per-kind Pydantic validation in the repository layer and
+`CHECK (json_valid(...))` at the column.
+
+---
+
+## DEC-024 — Hybrid retrieval: FAISS + FTS5 fused with Reciprocal Rank Fusion
+
+**Problem.** Pure vector search fails on the queries users most expect to work —
+exact identifiers, file paths, error codes, rare proper nouns. Asking for
+`MITTA-1481` should return `MITTA-1481`; a 384-dim embedding will not reliably do
+that.
+
+**Options.** (a) Vector search only. (b) Vector + FTS5, combined by weighted
+score sum. (c) Vector + FTS5, combined by Reciprocal Rank Fusion.
+
+**Decision.** (c). `score(d) = Σ 1/(k + rank_i(d))`, k = 60.
+
+**Why.** FAISS inner-product scores and FTS5 BM25 scores live on incomparable
+scales, so any weighting in option (b) is a magic constant that silently breaks
+as the corpus grows or the query shape changes. RRF consumes only ranks, so it
+needs no calibration and no retuning. FTS5 as an external-content table over
+`memories` costs one virtual table and three triggers.
+
+**Trade-off accepted.** Two indexes to keep in sync. FTS5 sync is trigger-driven
+and transactional; FAISS sync is reconciled by content hash (see DEC-025).
+
+---
+
+## DEC-025 — `AUTOINCREMENT` surrogate keys and hash-based index reconciliation
+
+**Problem.** FAISS addresses vectors by `int64`. SQLite reuses rowids after
+deletion unless `AUTOINCREMENT` is specified. A reused rowid means a stale vector
+resolves to a *different* memory.
+
+**Decision.** Every indexed table carries `seq INTEGER PRIMARY KEY AUTOINCREMENT`
+(the FAISS id) alongside `id TEXT UNIQUE` (a prefixed ULID for external use).
+`memory_embeddings` records the content hash **at embed time**, and staleness is
+computed by comparing it to the live hash.
+
+**Why.** The rowid-reuse failure is silent and severe — it surfaces as the
+assistant confidently recalling something the user never said, with no error
+anywhere. `AUTOINCREMENT` costs one extra `sqlite_sequence` row and makes it
+impossible. The content-hash comparison means the background embedder discovers
+its own work with a single SQL query instead of relying on an in-memory queue
+that a crash would lose, and it makes an embedding-model change a self-executing
+migration rather than a corruption (closing DEC-006's stated trade-off).
+
+**Also decided here.** Timestamps are `INTEGER` epoch milliseconds UTC, not
+ISO-8601 text: smaller, faster to range-scan, unambiguous about offset, and
+directly usable in the decay arithmetic. Human readability is restored by the
+`v_*` views rather than paid for on every row.
+
+---
+
+## DEC-026 — WebSocket authentication via `Sec-WebSocket-Protocol`
+
+**Problem.** Browsers forbid custom headers on a WebSocket handshake, so the
+session token cannot travel as `Authorization`.
+
+**Options.** (a) `?token=` query parameter. (b) First-frame authentication after
+the upgrade. (c) Token as a subprotocol value in `Sec-WebSocket-Protocol`.
+
+**Decision.** (c), plus an `Origin` check.
+
+**Why.** Option (a) writes the credential into every access log and into the
+sidecar's own request log — the exact class of leak DEC-017 exists to prevent.
+Option (b) leaves an authenticated-yet-unauthorised socket open for a window and
+requires state to track it. Option (c) authenticates before the upgrade
+completes and never touches a URL. The `Origin` check closes the local-CSRF path
+where a page in the user's browser opens a socket to the sidecar.
+
+---
+
+## DEC-027 — Streaming and personality: stream raw, then replace with styled
+
+**Problem.** Two requirements are in direct tension. Streaming demands emitting
+tokens as they arrive; DEC-008 demands the personality rewrite operate on the
+*complete* final response. You cannot restyle text you have not finished
+receiving.
+
+**Options.** (a) Buffer everything, style, then stream — correct output, but
+first-token latency becomes full-response latency. (b) Stream raw tokens, then
+replace the buffer with the styled text in one swap. (c) Stream the styled text
+by rewriting incrementally in a rolling window.
+
+**Decision.** (b).
+
+**Why.** Option (a) sacrifices the performance requirement outright, and on a
+voice-driven assistant the wait is felt directly. Option (c) requires the
+rewriter to commit to phrasing before it has seen the sentence, which is exactly
+how a style pass starts changing meaning — the failure DEC-008 exists to prevent.
+Option (b) keeps first-token latency untouched and confines the artefact to a
+single atomic swap.
+
+**Trade-off accepted, and mitigated.** With personality on, the visible text
+changes once after the stream ends. Three mitigations: register bounds the size
+of the swap in both directions (DEC-033); intensity zero is a no-op; and
+`turn.message` carries `styled: true|false` so the UI skips the swap when the
+rewrite returned its input unchanged.
+
+*Amended by DEC-033 — the first mitigation was originally a length threshold.*
+
+---
+
+## DEC-028 — Pydantic schemas are the single source of truth for types
+
+**Problem.** Python and TypeScript both describe the same API. Hand-maintaining
+both guarantees drift, and drift surfaces as a runtime error in production
+rather than a build error in CI.
+
+**Decision.** Pydantic models in `core/mitta/api/schemas/` are authoritative.
+`scripts/gen-types.sh` exports OpenAPI and generates the TypeScript types.
+Generated files are committed; CI fails if regeneration produces a diff.
+
+**Why.** Generating from the runtime-validating side means the types cannot
+describe something the server will reject. Committing the output lets the
+frontend build with no Python environment; the CI diff check is what stops the
+committed copy from going stale.
+
+**Alternative considered.** A hand-written shared schema (JSON Schema, Protobuf)
+as the source for both. Better in principle, worse here: it adds a third
+artefact to maintain and FastAPI already produces OpenAPI for free.
+
+---
+
+## DEC-029 — Layer dependencies enforced by `import-linter` in CI
+
+**Problem.** `ARCHITECTURE.md` §3 states each layer depends only on the
+interfaces below it. A diagram cannot enforce that, and layering violations are
+invisible in review once a codebase is large.
+
+**Decision.** `core/importlinter.ini` declares the ten layers as a machine-checked
+contract. CI fails the build on violation. Two contracts: a **layered** contract
+for the ordering, and a **forbidden** contract asserting that `tools` never
+imports `os_adapter`, and that nothing above `os_adapter` imports `subprocess`,
+references `osascript`, or contains a `~/Library` path.
+
+**Why.** The forbidden contract is the machine-checkable form of two guarantees
+that are otherwise only claims: the security layer cannot be bypassed
+(`ARCHITECTURE.md` §3), and no macOS assumption leaks above the adapter boundary
+(R1's enforcement clause). Both are exactly the kind of property that erodes
+silently. Paired with this, `bootstrap.py` constructs the tool dispatcher without
+an OS adapter reference at all — the policy engine holds it — so bypassing policy
+requires changing the composition root *and* the contract, both reviewed.
+
+---
+
+## DEC-030 — Approval single-use enforced in the database; audit log hash-chained
+
+**Extends DEC-010.**
+
+**Problem.** DEC-010 makes approval tokens single-use. Tracking "already used" in
+process memory means a crash — or a deliberately induced one — reopens the replay
+window.
+
+**Decision.** `approval_tokens.consumed_at` is written in the **same transaction**
+as the tool dispatch. Separately, every `audit_log` row stores
+`entry_hash = sha256(prev_hash ‖ canonical(entry))`.
+
+**Why.** Same-transaction consumption makes replay-after-restart impossible
+rather than unlikely. The hash chain does not make the log tamper-*proof* —
+anything with write access to the file can rewrite the whole chain — but it makes
+silent single-row edits and deletions detectable, which is the realistic threat
+model for a local audit trail. Cost is one hash per write.
+
+**Alternative considered.** Signing audit entries with a Keychain-held key. Real
+tamper-evidence, but it puts a Channel C round-trip on every audit write, and
+audit writes are on the tool-dispatch path.
+
+---
+
+## DEC-031 — Forward-only migrations, no down-migrations
+
+**Problem.** Schema evolution for a local single-user database.
+
+**Decision.** Numbered, checksummed, forward-only SQL migrations applied in one
+transaction on boot, with a file copy of the database taken first. No down
+migrations. FAISS is never migrated — it is rebuilt (DEC-005).
+
+**Why.** A rollback path that is never exercised is a rollback path that does not
+work. For a single-user local database the honest recovery story is the
+pre-migration backup, which is cheap and always correct. Checksums catch the
+specific failure where a migration file is edited after being applied somewhere,
+leaving two machines claiming schema version 7 with different schemas.
+
+**Trade-off accepted.** A bad migration means restoring a backup, not stepping
+back one version.
+
+---
+
+## DEC-032 — Phase 2 scoped as a combined design phase
+
+**Problem.** The 16-phase plan lists Phase 2 as "Project Structure" alone, while
+the working rules require Requirements → Architecture → System Design → Data Flow
+→ **API Design** → **Folder Structure** → **Database Design** all approved before
+implementation begins.
+
+**Decision.** Phase 2 delivers folder structure, API contract and database schema
+as documents, in one approval gate. *(Product owner decision.)*
+
+**Why.** These three are mutually constraining — the API shape depends on what
+the schema can answer, and the folder structure depends on where the API lives.
+Approving them separately would mean approving each against assumptions about the
+other two. No code is written in this phase, so the rule that implementation
+follows design is satisfied.
+
+---
+
+## DEC-033 — Response length is governed by register, not by a length threshold
+
+**Amends the first mitigation in DEC-027. Closes the open question in
+`PERSONALITY_PROFILE.md`.**
+
+**Problem.** Terseness is the defining trait of the style profile (mean reply
+≈ 2.8 words), but MITTA must sometimes deliver a plan, a diff or a real
+explanation. Something has to decide when the profile yields.
+
+**Options.** (a) Skip personality above a configurable response length — long
+output stays plain. (b) Scale style intensity down as length grows.
+(c) Two named registers selected upstream, with length as a *consequence* of
+register.
+
+**Decision.** (c). Default register is `playful` — short, lowercase, vocatives,
+one-word verdicts. Register shifts to `serious` when the user is serious or the
+topic is serious, and length is then whatever the content genuinely requires.
+*(Product owner decision. My Phase 2 report assumed (a); that assumption was
+wrong and is withdrawn.)*
+
+**Why (owner's rationale, and why it is the better design).** Option (a) has the
+causality backwards: it treats length as the cause and suppresses style as the
+effect, which produces a system that goes flat and characterless precisely when
+it is being most useful. It also cannot distinguish a long *playful* ramble
+(which should not happen) from a long *serious* answer (which should). Register
+makes the real variable explicit — a one-word reply to a serious question and a
+paragraph of banter are both failures, and only a register model can name both.
+
+Option (b) is worse than either: continuously dialling intensity by length gives
+no stable voice at any length and no testable expected output.
+
+**Where the signal comes from.** Register is computed **upstream** and passed to
+the personality layer as an input. Three inputs in order: a forced-serious list
+that never classifies (destructive-action confirmations, refusals, security
+decisions, errors and data-loss risk, financial/legal/medical topics); the
+user's own register; and whether the content can be compressed without losing
+information.
+
+**DEC-008 is preserved, and this is the load-bearing detail.** Register is an
+*input* to styling, never an output of it. The personality layer still receives
+only (text, profile, register) and still cannot see memory, tools or the user's
+message. Had the layer been allowed to classify seriousness itself, it would
+have needed the conversation as context — and a style stage holding conversation
+context is one prompt away from influencing a decision, which is the exact
+failure DEC-008 exists to prevent.
+
+**Trade-off accepted.** Register classification is a judgement call and will
+sometimes be wrong — answering playfully to something the user meant seriously
+is the failure that stings. Mitigations: the forced-serious list is deterministic
+and covers every case where a wrong register is dangerous rather than merely
+annoying; the register is reported on the wire so the UI can show it; and a
+manual override is available. Misclassification in the remaining space costs
+tone, not correctness.
+

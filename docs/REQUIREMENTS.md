@@ -182,3 +182,4 @@ goal. See DEC-020 for the risk and its mitigation.
 | Date | Change |
 | --- | --- |
 | 2026-07-29 | Initial requirements from Phase 1 review. Platform narrowed to macOS-first (supersedes cross-platform scope in DEC-001/DEC-003). Model posture changed to two-key BYOK (amends DEC-007). Local-only storage ratified (confirms DEC-005/DEC-006). |
+| 2026-07-29 | **Phase 2.** R8 confirmed: "completely cloud" applies to *reasoning models only* — embeddings remain on-device, so R5 stays enforceable (DEC-022). No requirement changed. Design records added: `PROJECT_STRUCTURE.md`, `API_DESIGN.md`, `DATABASE_DESIGN.md`. |
