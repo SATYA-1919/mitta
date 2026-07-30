@@ -4,6 +4,13 @@ Engineering record of significant decisions. Each entry states the problem, the
 options considered, what was chosen and why. Entries are append-only; if a
 decision is reversed, a new entry supersedes it rather than editing history.
 
+**Numbering.** Take the next number above the highest in this file, not the
+highest in your phase. Two sessions working in parallel collided on DEC-105 and
+then again on DEC-108, because each numbered from where its own section ended.
+A duplicate is worse than a gap: `grep '^## DEC-114'` is how these get cited from
+code comments, and it has to return one entry. Gaps are fine — a number claimed
+by work that was abandoned should stay claimed.
+
 ---
 
 ## DEC-001 — Desktop shell: Tauri v2
@@ -3018,7 +3025,7 @@ difference between a defect and a one-time setting the user can act on.
 
 ---
 
-## DEC-108 — Two permission bugs, one of them mine
+## DEC-120 — Two permission bugs, one of them mine
 
 Voice reported *"microphone and Speech Recognition access have not been
 granted"* while System Settings showed MITTA switched **on** in both panes.
