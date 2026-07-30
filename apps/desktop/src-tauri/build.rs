@@ -3,7 +3,48 @@ use std::process::Command;
 
 fn main() {
     tauri_build::build();
+    embed_info_plist();
     build_voice();
+}
+
+/// Embed `Info.plist` directly into the executable.
+///
+/// Tauri merges that file into the `.app` when it *bundles*, and `make app`
+/// does not bundle — it runs `cargo run`, which produces a bare Mach-O. macOS
+/// TCC keys microphone and speech-recognition grants to a bundle identifier and
+/// refuses to present a prompt at all without the matching usage description, so
+/// an unbundled binary is anonymous to the permission system: the Speech
+/// Recognition authorisation sits at `notDetermined` forever, and voice fails
+/// with "permission has not been granted" no matter what the user ticks in
+/// System Settings.
+///
+/// `-sectcreate __TEXT __info_plist` is how a plain executable carries a plist.
+/// With it, the dev binary has the same identity and usage strings as the
+/// bundled app, so the prompt appears once and the grant sticks.
+///
+/// It does not survive a rebuild changing the binary's ad-hoc signature — TCC
+/// re-asks after a recompile, which is a development cost, not a bug.
+fn embed_info_plist() {
+    println!("cargo:rerun-if-changed=Info.plist");
+
+    if !cfg!(target_os = "macos") {
+        return;
+    }
+
+    let plist = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"))
+        .join("Info.plist");
+    if !plist.exists() {
+        panic!(
+            "Info.plist is missing at {}. Without it macOS cannot grant \
+             microphone or speech-recognition access to this binary.",
+            plist.display()
+        );
+    }
+
+    println!(
+        "cargo:rustc-link-arg=-Wl,-sectcreate,__TEXT,__info_plist,{}",
+        plist.display()
+    );
 }
 
 /// Compile the Swift speech layer into a static library and link it.

@@ -2640,7 +2640,7 @@ the guarantee.
 
 ---
 
-## DEC-105 — The phase is the path table; the rest of a project is CRUD
+## DEC-108 — The phase is the path table; the rest of a project is CRUD
 
 **Problem.** `projects`, `project_paths` and `project_resources` were all created
 by the Phase 3 migration and never read. "Build projects" could reasonably mean
@@ -2670,7 +2670,7 @@ exists anyway, so the surface is built against a fixed shape rather than a guess
 
 ---
 
-## DEC-106 — Canonicalise before comparing, and compare components not characters
+## DEC-109 — Canonicalise before comparing, and compare components not characters
 
 **Problem.** Every containment check is a chance to be defeated by a path that
 means something other than it says.
@@ -2703,7 +2703,7 @@ be seen, and following it is the check.
 
 ---
 
-## DEC-107 — Longest match wins, in both directions
+## DEC-110 — Longest match wins, in both directions
 
 **Problem.** A project rooted at `~/work/mitta` with `~/work/mitta/.env`
 excluded needs the exclusion to beat the root. But the reverse also has to work:
@@ -2726,7 +2726,7 @@ independent of the query plan, which is asserted both ways in the tests.
 
 ---
 
-## DEC-108 — Outside every project is a question, not a refusal
+## DEC-111 — Outside every project is a question, not a refusal
 
 **Problem.** What should the boundary say about a path no project covers?
 
@@ -2744,7 +2744,7 @@ distinction is between *not told* and *told not to*.
 
 ---
 
-## DEC-109 — The engine learns which arguments are paths from a declaration
+## DEC-112 — The engine learns which arguments are paths from a declaration
 
 **Problem.** `PolicyEngine.evaluate` receives `(spec, params)`. To resolve a
 path against the boundary it has to know which parameters are paths, and it
@@ -2778,7 +2778,7 @@ wrong from a missing file. A boundary is worth less the day after it is needed.
 
 ---
 
-## DEC-110 — `writable` widens where, not whether
+## DEC-113 — `writable` widens where, not whether
 
 **Problem.** If a path is registered writable, should a `WRITE` tool acting
 inside it still ask?
@@ -2798,7 +2798,7 @@ able to look inside the project is what registering it was for.
 
 ---
 
-## DEC-111 — A refusal is not a question, and an approval cannot lift one
+## DEC-114 — A refusal is not a question, and an approval cannot lift one
 
 **Problem.** The engine gained a verdict it never used to produce. `Decision`
 already had three states, but every path through `evaluate` returned `allow` or
@@ -2820,7 +2820,7 @@ looks at any token and audits the attempt including whether one was presented.
 
 ---
 
-## DEC-112 — Archiving a project withdraws its path grants
+## DEC-115 — Archiving a project withdraws its path grants
 
 **Problem.** Archiving is a filing operation for a conversation. Is it one for a
 project?
@@ -2839,7 +2839,7 @@ changes what MITTA may do and not just how a list is sorted.
 
 ---
 
-## DEC-113 — The boundary is inspectable before it is enforced
+## DEC-116 — The boundary is inspectable before it is enforced
 
 **Decision.** `GET /v1/projects/resolve-path` returns what the engine would
 conclude about a path, and why. It is an addition to `API_DESIGN.md` §3.4.
@@ -2856,7 +2856,7 @@ sentence.
 
 ---
 
-## DEC-114 — Two mistakes this phase made, and what caught them
+## DEC-117 — Two mistakes this phase made, and what caught them
 
 Recorded because both were the kind that passes review.
 
@@ -3014,3 +3014,38 @@ So `voice_info` reports the chosen voice and its quality, the UI says "better
 voice" when only compact ones exist, and the button opens the pane where the
 download happens. Not a fix — there is no API to install a voice — but the
 difference between a defect and a one-time setting the user can act on.
+
+
+---
+
+## DEC-108 — Two permission bugs, one of them mine
+
+Voice reported *"microphone and Speech Recognition access have not been
+granted"* while System Settings showed MITTA switched **on** in both panes.
+
+**The first bug: it never asked.** `start()` checked the authorisation status
+and, if it was not `granted`, wrote an error and returned. `requestAuth()`
+existed and nothing on the start path called it, so the supported route to a
+grant — the system dialog — was never shown. The only way in was to find two
+separate Settings panes unaided, which is what the user did.
+
+It now requests both permissions, in sequence rather than together so the two
+modal dialogs do not stack, and starts listening as soon as they are granted.
+Saying yes is enough; the button does not need pressing twice.
+
+**The second bug: the grant attached to a build, not to the application.** The
+linker's ad-hoc signature carries an identifier derived from the compile —
+`mitta-a0dab33572f5e733` on one build, `mitta-7473b53e5afff6c6` on the next. TCC
+records the grant against that identifier, so every rebuild produced a binary
+macOS had never seen. The switch in Settings stayed on and referred to a binary
+that no longer existed.
+
+`scripts/app.sh` now re-signs ad-hoc with a fixed identifier,
+`com.mitta.desktop`, which is stable across rebuilds. Still ad-hoc: a real
+signature needs a Developer ID, and this is a build you run from source.
+
+**Why it took a diagnostic to see.** The combined status answered "not granted"
+without saying which of the two permissions disagreed, or that the question was
+being asked about a different binary than the one in Settings. `voice.rs` now
+logs both separately at startup, which is the line that would have made this a
+minute's work instead of an hour's.

@@ -36,7 +36,8 @@ const SESSION_RECYCLE: Duration = Duration::from_secs(45);
 extern "C" {
     fn mitta_voice_auth_status() -> i32;
     fn mitta_voice_request_auth();
-    fn mitta_voice_start() -> i32;
+    fn mitta_voice_start(gated: bool) -> i32;
+    fn mitta_voice_calibrate(observed: c_float) -> c_float;
     fn mitta_voice_stop();
     fn mitta_voice_state() -> i32;
     fn mitta_voice_level() -> c_float;
@@ -52,6 +53,7 @@ extern "C" {
     fn mitta_voice_voice_quality() -> i32;
     fn mitta_voice_copy_catalogue() -> *mut c_char;
     fn mitta_voice_set_voice(identifier: *const c_char);
+    fn mitta_voice_copy_auth_detail() -> *mut c_char;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -182,12 +184,37 @@ pub fn authorization() -> Authorization {
     Authorization::from(unsafe { mitta_voice_auth_status() })
 }
 
+/// Both permissions, separately, as they are reported right now.
+///
+/// Logged at startup. "Not granted" while System Settings shows two switches
+/// on is a question about *which* side disagrees, and about whether the grant
+/// belongs to this build at all — neither of which a combined answer can tell
+/// you.
+pub fn authorization_detail() -> String {
+    let raw = take_string(unsafe { mitta_voice_copy_auth_detail() });
+    let mut parts = raw.split(',');
+    let name = |code: Option<&str>| match code {
+        Some("2") => "granted",
+        Some("1") => "denied",
+        Some("3") => "restricted",
+        _ => "notDetermined",
+    };
+    let speech = name(parts.next());
+    let mic = name(parts.next());
+    format!("speech={speech} microphone={mic}")
+}
+
 pub fn request_authorization() {
     unsafe { mitta_voice_request_auth() }
 }
 
-pub fn start_listening() -> Result<(), String> {
-    let code = unsafe { mitta_voice_start() };
+/// Start the recogniser.
+///
+/// `gated` feeds it only while there is speech-like energy — for wake mode,
+/// which stays on for hours. Never for push-to-talk, where the user is holding a
+/// button and expects every syllable captured.
+pub fn start_listening(gated: bool) -> Result<(), String> {
+    let code = unsafe { mitta_voice_start(gated) };
     if code == 0 {
         return Ok(());
     }
@@ -201,6 +228,20 @@ pub fn start_listening() -> Result<(), String> {
 
 pub fn stop_listening() {
     unsafe { mitta_voice_stop() }
+}
+
+/// Tune the speech gate to this room and this voice. Returns the threshold set.
+///
+/// `observed` is the ambient level measured by the webview from the update
+/// stream it already receives, so the measurement happens where the levels
+/// already are rather than through a second Swift path.
+///
+/// This is the part of "train MITTA to my voice" that Apple's APIs permit. It is
+/// not a voiceprint — no public framework offers speaker adaptation — but the
+/// threshold it sets is what decides whether the wake word is heard at all, and
+/// it is specific to how loud this person is in this room.
+pub fn calibrate(observed: f32) -> f32 {
+    unsafe { mitta_voice_calibrate(observed) }
 }
 
 pub fn speak(text: &str, rate: f32) {
@@ -329,7 +370,9 @@ pub fn spawn_poll_loop(app: AppHandle, state: Arc<VoiceState>) {
             // to need this.
             if state.is_continuous() && session_started.elapsed() > SESSION_RECYCLE {
                 stop_listening();
-                if let Err(error) = start_listening() {
+                // Recycling only ever happens in continuous mode, so the
+                // gate is restored with it.
+                if let Err(error) = start_listening(true) {
                     log::warn!("voice: could not recycle the recognition session: {error}");
                 }
                 session_started = std::time::Instant::now();

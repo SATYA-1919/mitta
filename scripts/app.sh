@@ -35,6 +35,25 @@ if [[ ! -x "$CARGO" ]]; then
   exit 1
 fi
 
+
+# Give the binary a stable identity, so macOS permissions survive a rebuild.
+#
+# The linker's own ad-hoc signature carries an identifier derived from the
+# build — `mitta-a0dab33572f5e733` one compile, `mitta-7473b53e5afff6c6` the
+# next. TCC records a microphone grant against that identifier, so every
+# rebuild produced a binary macOS had never seen: System Settings kept showing
+# MITTA switched on for both permissions while the app reported neither.
+#
+# Re-signing ad-hoc with a fixed identifier makes the grant stick to the
+# application rather than to one compile of it. Still ad-hoc — a real signature
+# needs a Developer ID, and this is a build you run from source.
+sign_for_tcc() {
+  local binary="$1"
+  codesign --force --sign - --identifier com.mitta.desktop "$binary" 2>/dev/null || {
+    echo "  ! could not sign ${binary}; microphone access may be re-prompted" >&2
+  }
+}
+
 cleanup() {
   local code=$?
   [[ -n "${VITE_PID:-}" ]] && kill "$VITE_PID" 2>/dev/null || true
@@ -48,7 +67,10 @@ if [[ "$RELEASE" == "1" ]]; then
   echo "▸ building the frontend…"
   (cd "$UI" && npm run build >/dev/null)
   echo "▸ building the app (this takes a few minutes the first time)…"
-  cd "$SHELL_DIR" && exec "$CARGO" run --release
+  cd "$SHELL_DIR"
+  "$CARGO" build --release
+  sign_for_tcc "${SHELL_DIR}/target/release/mitta"
+  exec "${SHELL_DIR}/target/release/mitta"
 fi
 
 echo "▸ starting the dev server…"
@@ -74,4 +96,7 @@ fi
 echo "  frontend ready on http://127.0.0.1:1420"
 echo "▸ launching MITTA…"
 echo
-cd "$SHELL_DIR" && "$CARGO" run
+cd "$SHELL_DIR"
+"$CARGO" build
+sign_for_tcc "${SHELL_DIR}/target/debug/mitta"
+"${SHELL_DIR}/target/debug/mitta"

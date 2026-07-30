@@ -71,6 +71,10 @@ pub fn run() {
             // The microphone stays closed until asked for. This only starts
             // the loop that reports its state; DEC-105 makes opening it an
             // explicit act by the user.
+            log::info!(
+                "voice permissions at startup: {}",
+                voice::authorization_detail()
+            );
             let voice_state = Arc::new(voice::VoiceState::new());
             app.manage(Arc::clone(&voice_state));
             voice::spawn_poll_loop(app.handle().clone(), voice_state);
@@ -115,6 +119,7 @@ pub fn run() {
             commands::get_permissions_status,
             commands::voice_request_permission,
             commands::voice_start,
+            commands::voice_calibrate,
             commands::voice_stop,
             commands::voice_speak,
             commands::voice_stop_speaking,
@@ -218,15 +223,56 @@ fn register_hotkey(app: &tauri::AppHandle) {
 
     // Cmd+Shift+Space. Cmd+Space is Spotlight and Cmd+Alt+Space is its file
     // search — taking either would break something the user already relies on.
-    let shortcut = Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::Space);
+    let palette = Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::Space);
     let handle = app.clone();
 
-    if let Err(e) = app.global_shortcut().on_shortcut(shortcut, move |_, _, _| {
+    if let Err(e) = app.global_shortcut().on_shortcut(palette, move |_, _, _| {
         let _ = windows::toggle_palette(&handle);
     }) {
         // Not fatal. Another application may already hold the combination, and
         // an assistant that refuses to launch over a hotkey conflict is worse
         // than one whose hotkey needs reassigning in settings.
         log::warn!("could not register the global hotkey: {e}");
+    }
+
+    register_push_to_talk(app);
+}
+
+/// Push-to-talk, registered globally rather than as a webview key handler.
+///
+/// ⌘⇧V was previously a `keydown` listener in the webview, which means it only
+/// worked while MITTA had focus — and the moment you are talking to an assistant
+/// is precisely the moment you are looking at something else. A hold-to-talk key
+/// that requires you to click the window first is a hold-to-talk key you would
+/// not use.
+///
+/// This is also the answer to the dedicated mic/dictation key opening Siri. That
+/// key is bound by macOS below the application layer and no application can
+/// outrank it, so the fix is not to fight for it: it is for MITTA to own a chord
+/// that works from anywhere, and for the OS key to be turned off in System
+/// Settings if the user wants it back.
+///
+/// Registered as press *and* release, which is what makes it a hold rather than
+/// a toggle — the same shape as the on-screen button.
+fn register_push_to_talk(app: &tauri::AppHandle) {
+    use tauri_plugin_global_shortcut::{
+        Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState,
+    };
+
+    let shortcut = Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyV);
+    let handle = app.clone();
+
+    if let Err(e) = app
+        .global_shortcut()
+        .on_shortcut(shortcut, move |_, _, event| {
+            // Forwarded to the webview rather than driving the recogniser from
+            // here. The webview owns what a finished utterance *means* — it fills
+            // the composer and sends — and splitting that across two components
+            // would give the same gesture two behaviours to drift apart.
+            let down = event.state() == ShortcutState::Pressed;
+            let _ = handle.emit("voice:push_to_talk", down);
+        })
+    {
+        log::warn!("could not register the push-to-talk hotkey: {e}");
     }
 }

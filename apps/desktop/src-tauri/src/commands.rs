@@ -136,13 +136,23 @@ pub fn voice_start(
     state: State<'_, Arc<VoiceState>>,
     continuous: Option<bool>,
 ) -> Result<(), ShellError> {
-    voice::set_continuous(&state, continuous.unwrap_or(false));
-    voice::start_listening().map_err(ShellError::Internal)?;
+    let wake_mode = continuous.unwrap_or(false);
+    voice::set_continuous(&state, wake_mode);
+    // Gated only in wake mode. Push-to-talk is a held button and must capture
+    // every syllable; wake mode stays open for hours and is where the battery
+    // cost of continuous recognition actually lands.
+    voice::start_listening(wake_mode).map_err(ShellError::Internal)?;
     // Set only after the recogniser is actually running. Marking it listening
     // first would light the "microphone live" indicator for a session that
     // failed to open, which is the one direction this indicator must never err.
     voice::set_listening(&state, true);
     Ok(())
+}
+
+/// Set the speech gate from a measured ambient level. Returns the threshold.
+#[tauri::command]
+pub fn voice_calibrate(observed: f32) -> f32 {
+    voice::calibrate(observed)
 }
 
 #[tauri::command]
