@@ -230,7 +230,7 @@ private final class VoiceEngine {
         // Hangover holds the gate open through the pauses inside a sentence, so
         // "mitta ... open spotify" is one utterance rather than two fragments.
         let preRoll = max(1, Int(0.30 * format.sampleRate / 1024))
-        let hangover = max(1, Int(0.80 * format.sampleRate / 1024))
+        let hangover = max(1, Int(0.55 * format.sampleRate / 1024))
         var recent: [AVAudioPCMBuffer] = []
         var quietFrames = 0
         var open = false
@@ -265,6 +265,21 @@ private final class VoiceEngine {
                 if quietFrames >= hangover {
                     open = false
                     quietFrames = 0
+                    // The gate closing *is* the end of the utterance, and it is
+                    // the only end-of-utterance signal available in this mode.
+                    //
+                    // Apple decides `isFinal` from trailing silence, and gating
+                    // stops feeding audio the moment speech stops — so the
+                    // recogniser never receives the silence it would judge, and
+                    // in a continuous task `isFinal` may never arrive at all.
+                    // The webview then waits out its full fallback timer on every
+                    // request, which is the latency the gate was supposed not to
+                    // add.
+                    //
+                    // Marking final here hands that signal back through the
+                    // existing field rather than adding a parallel one, so the
+                    // webview's "deliver on isFinal" path needs no special case.
+                    self?.markUtteranceEnd()
                 }
                 return
             }
@@ -433,6 +448,18 @@ private final class VoiceEngine {
             self.isFinal = final
             self.transcriptSeq &+= 1
         }
+    }
+
+    /// Mark the current transcript as a finished utterance.
+    ///
+    /// Called when the energy gate closes after speech. Only meaningful when
+    /// there is something to finish: marking an empty transcript final would
+    /// publish an end-of-utterance for silence, and the webview delivers on
+    /// exactly that signal.
+    func markUtteranceEnd() {
+        let pending = lock.withLock { transcript }
+        guard !pending.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        record(transcript: pending, final: true)
     }
 
     private func record(level value: Float) {

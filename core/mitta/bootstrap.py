@@ -58,6 +58,7 @@ from mitta.projects.boundary import PathBoundary
 from mitta.projects.repository import ProjectRepository
 from mitta.telemetry.logging import get_logger, setup_logging
 from mitta.telemetry.redaction import SecretRedactor
+from mitta.tools.builtin.close_app import CloseAppTool
 from mitta.tools.builtin.open_app import OpenAppTool
 from mitta.tools.builtin.open_url import OpenUrlTool
 from mitta.tools.builtin.web_search import WebSearchTool
@@ -198,6 +199,7 @@ def build_runtime(
     # `mitta.os_adapter`, and that contract is what keeps platform access behind
     # the policy engine (DEC-079).
     registry.register(OpenAppTool(os_adapter.open_application))
+    registry.register(CloseAppTool(os_adapter.close_application))
     registry.register(OpenUrlTool(os_adapter.open_url))
     registry.register(WriteNoteTool(paths.storage_root / "notes"))
     tools = ToolExecutor(registry, policy, database)

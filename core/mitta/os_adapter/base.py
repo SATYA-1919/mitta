@@ -59,6 +59,21 @@ class OSAdapter(Protocol):
         """
         ...
 
+    def close_application(self, name: str) -> None:
+        """Ask an application to quit.
+
+        *Ask*, not kill. The platform call must be the one that lets the app run
+        its own shutdown — offering to save, flushing state — because the whole
+        difference between closing an editor and losing an afternoon's work is
+        whether it got to put its dialog up. An implementation that reaches for
+        `SIGKILL` is wrong even though it is more reliable.
+
+        Raises if the application is not running, rather than reporting success:
+        "closed it" about something that was never open is a lie the user will
+        act on.
+        """
+        ...
+
     def open_url(self, url: str) -> None:
         """Open a URL in the user's default browser.
 

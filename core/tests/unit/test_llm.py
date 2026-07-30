@@ -430,6 +430,12 @@ class TestToolGating:
             "search the web for barca news",
             "look up the latest ballon d'or winner",
             "open spotify",
+            # Closing is an action like opening, and its absence from the gate
+            # made `close_app` unreachable however well the tool itself worked.
+            "close spotify",
+            "quit safari",
+            "exit music",
+            "shut down chrome",
             "save a note called ideas.md",
             "write this down for me",
             "who won the match today",

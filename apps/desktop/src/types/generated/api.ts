@@ -88,6 +88,52 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/conversations/history/clear": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Clear a range
+         * @description Irreversible. Deletes whole conversations, cascading to their transcripts.
+         *
+         *     Audited, and the entry records the resolved cutoff rather than the word the
+         *     user pressed — "since 1785340800" is checkable later, "this month" is not.
+         */
+        post: operations["clear_history_v1_conversations_history_clear_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/conversations/history/count": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Size of a range
+         * @description How many conversations clearing `range` would delete.
+         *
+         *     Declared before `/{conversation_id}`: FastAPI matches in registration order,
+         *     so a literal segment registered after the parameterised one is unreachable.
+         */
+        get: operations["history_count_v1_conversations_history_count_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/conversations/{conversation_id}": {
         parameters: {
             query?: never;
@@ -638,6 +684,31 @@ export interface components {
             /** Voice */
             voice: boolean;
         };
+        /**
+         * ClearHistoryRequest
+         * @description Which slice of history to delete.
+         *
+         *     A named period rather than a timestamp, because the cutoff is computed
+         *     server-side (`conversations.ranges`). A client-supplied boundary means the
+         *     set actually deleted can differ from the set the button named, and this is
+         *     irreversible.
+         */
+        ClearHistoryRequest: {
+            /**
+             * Confirm
+             * @default false
+             */
+            confirm: boolean;
+            range: components["schemas"]["HistoryRange"];
+        };
+        /** ClearHistoryResponse */
+        ClearHistoryResponse: {
+            /** Deleted */
+            deleted: number;
+            range: components["schemas"]["HistoryRange"];
+            /** Since */
+            since: number | null;
+        };
         /** ComponentStatus */
         ComponentStatus: {
             /** Detail */
@@ -762,6 +833,22 @@ export interface components {
             /** Uptime Seconds */
             uptime_seconds: number;
         };
+        /**
+         * HistoryCountResponse
+         * @description How many conversations a given range would delete, for the confirmation.
+         */
+        HistoryCountResponse: {
+            /** Count */
+            count: number;
+            range: components["schemas"]["HistoryRange"];
+            /** Since */
+            since: number | null;
+        };
+        /**
+         * HistoryRange
+         * @enum {string}
+         */
+        HistoryRange: "today" | "week" | "month" | "year" | "all";
         /**
          * InputKind
          * @enum {string}
@@ -1338,6 +1425,70 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ConversationResource"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    clear_history_v1_conversations_history_clear_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClearHistoryRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClearHistoryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    history_count_v1_conversations_history_count_get: {
+        parameters: {
+            query: {
+                range: components["schemas"]["HistoryRange"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HistoryCountResponse"];
                 };
             };
             /** @description Validation Error */

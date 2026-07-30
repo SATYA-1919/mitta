@@ -7,6 +7,7 @@ filesystem conventions.
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -57,6 +58,46 @@ class MacAdapter:
             timeout=15,
         )
 
+    def close_application(self, name: str) -> None:
+        """AppleScript `quit`, which is a request the application can answer.
+
+        `osascript -e 'quit app "X"'` sends the Apple Event an app handles by
+        running its normal shutdown — an unsaved document still gets its save
+        dialog. `pkill` would be simpler, more reliable, and would throw that
+        away, which is the one property this must not have.
+
+        The name goes through a separate argument, never interpolated into the
+        script text, because a name containing a double quote would otherwise
+        end the string literal and the rest would be AppleScript. `argv` inside
+        the script is the parameterised-query equivalent for `osascript`.
+
+        `System Events` is asked first whether the app is running, so a request
+        to close something already closed fails loudly instead of quietly
+        succeeding.
+        """
+        script = (
+            'on run argv\n'
+            '  set target to item 1 of argv\n'
+            '  tell application "System Events"\n'
+            '    if not (exists process target) then error target & " is not running" number 1\n'
+            '  end tell\n'
+            '  quit application target\n'
+            'end run'
+        )
+        completed = subprocess.run(  # noqa: S603 - list form, no shell; the name is a bound argument
+            ["/usr/bin/osascript", "-e", script, name],
+            check=False,
+            capture_output=True,
+            timeout=20,
+        )
+        if completed.returncode != 0:
+            # `check=True` would raise `CalledProcessError`, whose message is the
+            # entire argv — including the script source. That string is relayed
+            # to the model and then to the user, so the reason has to be the
+            # reason: "Spotify is not running", not forty lines of AppleScript.
+            detail = completed.stderr.decode("utf-8", "replace").strip()
+            raise RuntimeError(_osascript_reason(detail))
+
     def open_url(self, url: str) -> None:
         """`open <url>`, with the scheme re-checked here.
 
@@ -74,3 +115,22 @@ class MacAdapter:
             capture_output=True,
             timeout=15,
         )
+
+
+def _osascript_reason(stderr: str) -> str:
+    """The human half of an `osascript` failure.
+
+    `osascript` reports errors as `124:150: execution error: Chess is not
+    running (1)` — a character range, a category, the sentence, and an error
+    number. Only the sentence means anything to the person who asked, and this
+    string is relayed to them through the model.
+    """
+    if not stderr:
+        return "the application did not quit"
+    line = stderr.splitlines()[-1].strip()
+    # Drop the leading `<start>:<end>: ` offsets and the category prefix.
+    line = re.sub(r"^\d+:\d+:\s*", "", line)
+    line = re.sub(r"^(execution|syntax) error:\s*", "", line)
+    # Drop the trailing AppleScript error number.
+    line = re.sub(r"\s*\(-?\d+\)$", "", line)
+    return line or "the application did not quit"

@@ -78,7 +78,7 @@ class Resolution:
 
     @property
     def refused(self) -> bool:
-        """A standing refusal. No confirmation can lift it — see DEC-111."""
+        """A standing refusal. No confirmation can lift it — see DEC-114."""
         return self.containment is Containment.EXCLUDED
 
     @property

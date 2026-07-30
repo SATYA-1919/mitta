@@ -15,6 +15,7 @@ from mitta.conversations.models import (
     Turn,
     TurnStatus,
 )
+from mitta.conversations.ranges import HistoryRange
 
 
 class ConversationResource(Schema):
@@ -123,6 +124,38 @@ class CreateConversationRequest(Schema):
 class UpdateConversationRequest(Schema):
     title: str | None = Field(default=None, max_length=200)
     pinned: bool | None = None
+
+
+class ClearHistoryRequest(Schema):
+    """Which slice of history to delete.
+
+    A named period rather than a timestamp, because the cutoff is computed
+    server-side (`conversations.ranges`). A client-supplied boundary means the
+    set actually deleted can differ from the set the button named, and this is
+    irreversible.
+    """
+
+    range: HistoryRange
+    #: Must be sent as true. Not security — the endpoint is already
+    #: token-gated — but a guard against a mistyped `fetch` in the client
+    #: erasing a year of conversations with no round trip through a human.
+    confirm: bool = False
+
+
+class ClearHistoryResponse(Schema):
+    deleted: int
+    range: HistoryRange
+    #: The boundary that was actually used, so the client can show what "this
+    #: month" resolved to rather than asserting it. Null for `all`.
+    since: int | None
+
+
+class HistoryCountResponse(Schema):
+    """How many conversations a given range would delete, for the confirmation."""
+
+    range: HistoryRange
+    count: int
+    since: int | None
 
 
 class ConversationListResponse(Schema):

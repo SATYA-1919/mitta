@@ -452,7 +452,7 @@ function BoundaryChecker() {
               <span className={cx('readout uppercase', verdict.tone)}>{probe.containment}</span>
               {/* Three states, not two. An exclusion is refused outright, and
                   calling that "MITTA would ask" offers a choice the engine does
-                  not honour (DEC-111). */}
+                  not honour (DEC-114). */}
               <span className={cx(probe.refused ? 'text-danger' : 'text-fg-muted')}>
                 {probe.refused
                   ? '· MITTA would refuse'

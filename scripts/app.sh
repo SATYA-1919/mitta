@@ -54,6 +54,44 @@ sign_for_tcc() {
   }
 }
 
+# Wrap the binary in a real .app, because TCC will not read anything else.
+#
+# Signing with a stable identifier (above) fixes *which* app the grant attaches
+# to. It does not give TCC the usage descriptions, and without those the process
+# is killed outright the first time it touches speech — `Abort trap: 6`, with
+# `termination namespace TCC` in the crash report and nothing in our own logs.
+#
+# `build.rs` embeds Info.plist into the executable's `__TEXT,__info_plist`
+# section, which is valid, present and signed — and TCC ignores it. The usage
+# descriptions are only honoured from an `Info.plist` *file* inside a bundle, so
+# a bare `cargo run` can never be granted microphone access no matter how it is
+# signed. Hence a bundle, assembled around the binary cargo just built.
+#
+# Cheap enough to redo every launch: a directory, a copy and a plist. The
+# alternative is `tauri build`, which is a release compile and minutes per run.
+bundle_for_tcc() {
+  local binary="$1"
+  local app="${SHELL_DIR}/target/MITTA.app"
+
+  rm -rf "$app"
+  mkdir -p "${app}/Contents/MacOS"
+  cp "$binary" "${app}/Contents/MacOS/mitta"
+  cp "${SHELL_DIR}/Info.plist" "${app}/Contents/Info.plist"
+
+  # `CFBundleExecutable` is what launchd runs, and it is absent from the source
+  # plist because the embedded-section copy has no bundle to name it for.
+  /usr/libexec/PlistBuddy -c "Add :CFBundleExecutable string mitta" \
+    "${app}/Contents/Info.plist" >/dev/null 2>&1 || true
+  /usr/libexec/PlistBuddy -c "Add :CFBundlePackageType string APPL" \
+    "${app}/Contents/Info.plist" >/dev/null 2>&1 || true
+
+  # Sign the bundle, not the inner binary: TCC identifies the .app.
+  codesign --force --deep --sign - --identifier com.mitta.desktop "$app" 2>/dev/null || {
+    echo "  ! could not sign the bundle; microphone access may be re-prompted" >&2
+  }
+  echo "$app"
+}
+
 cleanup() {
   local code=$?
   [[ -n "${VITE_PID:-}" ]] && kill "$VITE_PID" 2>/dev/null || true
@@ -70,7 +108,8 @@ if [[ "$RELEASE" == "1" ]]; then
   cd "$SHELL_DIR"
   "$CARGO" build --release
   sign_for_tcc "${SHELL_DIR}/target/release/mitta"
-  exec "${SHELL_DIR}/target/release/mitta"
+  APP="$(bundle_for_tcc "${SHELL_DIR}/target/release/mitta")"
+  exec "${APP}/Contents/MacOS/mitta"
 fi
 
 echo "▸ starting the dev server…"
@@ -99,4 +138,18 @@ echo
 cd "$SHELL_DIR"
 "$CARGO" build
 sign_for_tcc "${SHELL_DIR}/target/debug/mitta"
-"${SHELL_DIR}/target/debug/mitta"
+APP="$(bundle_for_tcc "${SHELL_DIR}/target/debug/mitta")"
+echo "  bundled at ${APP}"
+
+# Launched through LaunchServices, not by running the inner binary.
+#
+# Executing `Contents/MacOS/mitta` directly leaves the process unassociated with
+# its bundle, so TCC still sees a bare executable, still finds no usage
+# description, and still kills it — the bundle was necessary but not sufficient.
+# `open` is what makes macOS treat this as the application com.mitta.desktop.
+#
+# The cost is that the shell's own stdout no longer arrives here; it goes to the
+# unified log. `log stream --predicate 'process == "mitta"'` reads it, and the
+# sidecar's log is unaffected because Python writes its own file.
+echo "  launching via LaunchServices — shell logs go to Console.app"
+open -W "$APP"

@@ -3049,3 +3049,100 @@ without saying which of the two permissions disagreed, or that the question was
 being asked about a different binary than the one in Settings. `voice.rs` now
 logs both separately at startup, which is the line that would have made this a
 minute's work instead of an hour's.
+
+---
+
+## DEC-118 — Spoken latency had three causes, and two of them were mine
+
+**Problem.** "MITTA is slow to respond to my voice", reported three times across
+a session, after two fixes that did not fix it.
+
+**What the measurement said.** The turn pipeline was instrumented per phase and
+driven with real requests against real providers:
+
+| Request | Total | recall | tools | reasoning | styling |
+| --- | --- | --- | --- | --- | --- |
+| "what is 2 plus 2" | 495 ms | 3 | 0 | 289 | 202 |
+| "who are you" | 551 ms | 1 | 0 | 301 | 247 |
+| "search the web for the tallest building" | 893 ms | 0 | 253 | 420 | 218 |
+
+**The backend was never the problem.** Every fix attempted before this table
+existed was aimed at the wrong component, and the table took twenty minutes to
+produce. That is the decision worth recording: the instrumentation should have
+come first, and `turn.timings` is now published on `turn.done` so it never has
+to be reconstructed again.
+
+**The three real causes, in the order they were found.**
+
+1. **A settle timer ignoring the signal it was standing in for.** The webview
+   waited a flat 1,200 ms of silence before submitting a spoken request. Apple
+   publishes `isFinal` when it decides an utterance ended, that flag was already
+   arriving as `update.isFinal`, and the store never read it.
+
+2. **The battery gate starved that signal.** Feeding the recogniser only during
+   speech (DEC-119) means it never receives the trailing silence it judges
+   `isFinal` from — so after fix (1), `isFinal` stopped arriving in the one mode
+   that mattered and the 1,200 ms fallback ran every time anyway. The fix that
+   worked was to treat the gate closing as the end of the utterance, since it is
+   the only end-of-speech signal that exists in that mode, and to hand it back
+   through the existing `isFinal` field rather than adding a parallel one.
+
+3. **The transcript accumulated.** One `SFSpeechRecognitionTask` produces a
+   cumulative transcript for its whole audio stream, and in wake mode one task
+   runs until the session recycles. The webview sent that field verbatim, so the
+   second request was `"mitta open spotify mitta open safari"` and the third
+   added to it again — every spoken request after the first carried all of its
+   predecessors, growing the prompt for 45 seconds.
+
+   This is the one that got *worse* the longer the feature was used, and the one
+   the backend timings could never have shown, because those were driven by
+   typed input. Fixed twice over: the published transcript is cut at the wake
+   word (`after_wake_word` already existed, was tested, and nothing called it),
+   and the session is recycled once an utterance is delivered so the underlying
+   string never accumulates at all.
+
+**Why both fixes for (3), when either sounds sufficient.** The cut alone cannot
+separate accumulated utterances — `wake_word_at` returns the *first* match, and
+deliberately so, because "open mitta docs" is a request that happens to name
+MITTA and a last-match cut would reduce it to "docs". The test asserts that
+limitation rather than pretending otherwise.
+
+**Consequence.** The voice bar now reports the measured gap between the wake word
+matching and the request being sent. Three fixes went into that gap on the
+strength of reasoning about it and two were wrong; the number is cheaper than the
+argument.
+
+---
+
+## DEC-119 — The wake-mode microphone is gated on energy, with a pre-roll
+
+**Problem.** Wake mode holds the microphone open indefinitely and fed every
+buffer to the on-device recogniser. That is the entire battery cost of leaving it
+on, and therefore the reason a user turns it off — at which point the wake word
+stops working and the feature may as well not exist.
+
+**Decision.** The audio tap always computes RMS and feeds the recogniser only
+while there is speech-like energy. Gated in wake mode only; push-to-talk is a
+held button and must capture every syllable.
+
+**Why the pre-roll is not optional.** By the time energy crosses the threshold
+the first consonant is already in a buffer that has gone past, so a naive gate
+eats the start of every phrase — and the word being eaten is "mitta", the one
+word that has to be heard. The last 300 ms of buffers are retained and flushed
+ahead of the first gated one. An 800 ms hangover (since reduced to 550 ms, once
+it became the delivery trigger) holds the gate open through the pauses inside a
+sentence, so "mitta … open spotify" is one utterance rather than two fragments.
+
+**Trade-off accepted.** The threshold is a guess until calibrated, and a guess
+that is too high misses the wake word. It is therefore set low by default —
+erring toward spending battery rather than toward not answering — and
+`calibrate` measures the room and fits it, using a 90th percentile rather than a
+maximum so one cough during the quiet window cannot set a threshold the wake word
+can never trip again.
+
+**What this is not.** Calibration is the honest part of "train MITTA to my
+voice". Apple exposes no speaker adaptation or voiceprint API, so nothing here
+learns how the user sounds; it learns how loud their room is, which is what
+decides whether the wake word is heard at all. A custom language model over the
+user's own phrasings remains unbuilt, and is the only remaining thing that would
+deserve the word "train".

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -14,8 +16,10 @@ from mitta.conversations.models import (
     Register,
     TurnStatus,
 )
+from mitta.conversations.ranges import HistoryRange, cutoff_for
 from mitta.conversations.repository import ConversationRepository
 from mitta.errors import NotFoundError
+from mitta.policy.audit import AuditLog
 
 NOW = 1_800_000_000
 
@@ -347,3 +351,139 @@ class TestApi:
         paths = client.app.openapi()["paths"]  # type: ignore[attr-defined]
         assert "/v1/conversations/{conversation_id}/messages" in paths
         assert "post" not in paths["/v1/conversations/{conversation_id}/messages"]
+
+
+class TestHistoryRanges:
+    """Calendar boundaries, not rolling windows.
+
+    A 24-hour window would delete last night's conversations at 9am, which is
+    not what "today" says.
+    """
+
+    def _at(self, iso: str) -> datetime:
+        return datetime.fromisoformat(iso).astimezone()
+
+    def test_today_starts_at_midnight_not_24_hours_ago(self) -> None:
+        now = self._at("2026-07-30T09:15:00")
+        assert cutoff_for(HistoryRange.TODAY, now=now) == int(
+            self._at("2026-07-30T00:00:00").timestamp()
+        )
+
+    def test_the_week_starts_on_monday(self) -> None:
+        # 2026-07-30 is a Thursday; the week began on the 27th.
+        now = self._at("2026-07-30T09:15:00")
+        assert cutoff_for(HistoryRange.WEEK, now=now) == int(
+            self._at("2026-07-27T00:00:00").timestamp()
+        )
+
+    def test_a_monday_is_its_own_week_start(self) -> None:
+        now = self._at("2026-07-27T23:59:00")
+        assert cutoff_for(HistoryRange.WEEK, now=now) == int(
+            self._at("2026-07-27T00:00:00").timestamp()
+        )
+
+    def test_month_and_year_start_at_the_first(self) -> None:
+        now = self._at("2026-07-30T09:15:00")
+        assert cutoff_for(HistoryRange.MONTH, now=now) == int(
+            self._at("2026-07-01T00:00:00").timestamp()
+        )
+        assert cutoff_for(HistoryRange.YEAR, now=now) == int(
+            self._at("2026-01-01T00:00:00").timestamp()
+        )
+
+    def test_all_is_none_rather_than_zero(self) -> None:
+        # A sentinel that is also a valid timestamp keeps working while meaning
+        # something else.
+        assert cutoff_for(HistoryRange.ALL) is None
+
+
+class TestClearHistory:
+    def test_delete_since_takes_the_threads_touched_in_the_window(
+        self, conversations: ConversationRepository
+    ) -> None:
+        old = conversations.create(ConversationDraft(title="last week"), now=1_000)
+        # Started before the cutoff but continued after it: part of "today".
+        continued = conversations.create(ConversationDraft(title="continued"), now=1_000)
+        conversations.rename(continued.id, "continued", now=9_000)
+        fresh = conversations.create(ConversationDraft(title="today"), now=9_000)
+
+        assert conversations.delete_since(5_000) == 2
+
+        remaining = {c.id for c in conversations.list_conversations()}
+        assert remaining == {old.id}
+        assert continued.id not in remaining
+        assert fresh.id not in remaining
+
+    def test_count_since_matches_what_delete_would_remove(
+        self, conversations: ConversationRepository
+    ) -> None:
+        conversations.create(ConversationDraft(title="a"), now=1_000)
+        conversations.create(ConversationDraft(title="b"), now=9_000)
+
+        predicted = conversations.count_since(5_000)
+        assert predicted == 1
+        assert conversations.delete_since(5_000) == predicted
+
+    def test_delete_all_removes_everything_including_archived(
+        self, conversations: ConversationRepository
+    ) -> None:
+        first = conversations.create(ConversationDraft(title="a"))
+        conversations.create(ConversationDraft(title="b"))
+        conversations.archive(first.id)
+
+        assert conversations.delete_all() == 2
+        assert conversations.count(status=None) == 0
+
+    def test_clearing_cascades_to_the_transcript(
+        self, conversations: ConversationRepository
+    ) -> None:
+        conversation = conversations.create(ConversationDraft(title="t"), now=9_000)
+        message = conversations.add_message(
+            conversation.id, MessageDraft(role=MessageRole.USER, content="hello"), now=9_000
+        )
+
+        conversations.delete_since(5_000)
+
+        with pytest.raises(NotFoundError):
+            conversations.get_message(message.id)
+
+    def test_clear_requires_confirm(
+        self, client: TestClient, auth_headers: dict[str, str]
+    ) -> None:
+        # A mistyped fetch in the client should not erase a year with no round
+        # trip through a human.
+        response = client.post(
+            "/v1/conversations/history/clear", json={"range": "year"}, headers=auth_headers
+        )
+        assert response.status_code == 422
+
+    def test_clear_over_http_reports_and_audits(
+        self, client: TestClient, auth_headers: dict[str, str], migrated_audit: AuditLog
+    ) -> None:
+        client.post("/v1/conversations", json={"title": "one"}, headers=auth_headers)
+
+        counted = client.get(
+            "/v1/conversations/history/count", params={"range": "today"}, headers=auth_headers
+        )
+        assert counted.json()["count"] == 1
+
+        cleared = client.post(
+            "/v1/conversations/history/clear",
+            json={"range": "today", "confirm": True},
+            headers=auth_headers,
+        )
+        assert cleared.status_code == 200
+        assert cleared.json()["deleted"] == 1
+        assert cleared.json()["since"] is not None
+
+        actions = [entry.action for entry in migrated_audit.recent(limit=5)]
+        assert "conversation.history_cleared" in actions
+
+    def test_the_count_route_is_not_shadowed_by_the_id_route(
+        self, client: TestClient, auth_headers: dict[str, str]
+    ) -> None:
+        # Registered after `/{conversation_id}` this would be read as an id.
+        response = client.get(
+            "/v1/conversations/history/count", params={"range": "all"}, headers=auth_headers
+        )
+        assert response.status_code == 200

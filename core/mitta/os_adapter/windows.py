@@ -38,6 +38,12 @@ class WindowsAdapter:
     def open_application(self, name: str) -> None:
         raise NotImplementedError(_DEFERRED)
 
+    def close_application(self, name: str) -> None:
+        # Must be a graceful close, not `taskkill /F`. The Windows equivalent of
+        # the Apple Event is posting `WM_CLOSE` to the main window, which lets
+        # the app show its save prompt; `/F` terminates and discards it.
+        raise NotImplementedError(_DEFERRED)
+
     def open_url(self, url: str) -> None:
         # Should be `start "" <url>` via the shell association, after rejecting
         # any scheme that is not http or https.

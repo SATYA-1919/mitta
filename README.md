@@ -31,11 +31,11 @@ make dev                            # or in a browser at http://127.0.0.1:1420
 | **Learning** | Durable facts extracted from conversation, credentials refused |
 | **Reasoning** | Groq and OpenRouter with health-based failover |
 | **Personality** | Register-based rewrite, verified so it cannot change meaning |
-| **Tools** | Web search, open an application, open a website, write a note |
+| **Tools** | Web search, open an application, close an application, open a website, write a note |
 | **Planner** | Bounded tool chains — four rounds, six calls, repeats served from cache |
 | **Permissions** | Parameter-bound single-use approvals, hash-chained audit log |
 | **Projects** | Scope for memory and conversations, and the filesystem boundary — registered roots, exclusions that beat them, write granted per path |
-| **Surfaces** | Chat, Memory, Projects, History, Monitor, Settings |
+| **Surfaces** | Chat, Memory, Projects, History (clearable by period), Monitor, Settings |
 | **Shell** | Tauri window, sidecar supervisor, Keychain, ⌘⇧Space palette |
 
 ## What does not
@@ -47,7 +47,7 @@ mechanism is still open (R7).
 The project write boundary is enforced by the policy engine, but no tool
 currently declares a filesystem path for it to check: `write_note` has its own
 narrower sandbox. The boundary was built before the tool that needs it on
-purpose, and it is exercised only by tests until that tool lands (DEC-109).
+purpose, and it is exercised only by tests until that tool lands (DEC-112).
 A project's timeline endpoint returns nothing, because nothing writes an episode
 yet.
 
@@ -58,7 +58,7 @@ model's tool calls. MITTA recovers the call from Groq's error body when it can
 ## Checking it rather than trusting it
 
 ```bash
-make check-all      # 570 Python · 70 TypeScript · 38 Rust, plus three import contracts
+make check-all      # 598 Python · 95 TypeScript · 46 Rust, plus three import contracts
 make secrets        # fails if a credential is in any committed file
 make check-models   # verifies the hardcoded model ids still exist upstream
 ```
@@ -73,7 +73,7 @@ tiers, and every action MITTA has taken with its hash chain verified on read.
 core/           Python sidecar — memory, agent, LLM gateway, tools, policy
 apps/desktop/   React frontend
   src-tauri/    Rust shell — supervises the sidecar, owns the Keychain
-docs/           Requirements, architecture, and 114 recorded decisions
+docs/           Requirements, architecture, and 120 recorded decisions
 scripts/        Development entry points
 ```
 

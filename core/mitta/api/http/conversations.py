@@ -11,16 +11,21 @@ from fastapi import APIRouter, Query, Request, Response, status
 
 from mitta.api.auth import RequireToken
 from mitta.api.schemas.conversations import (
+    ClearHistoryRequest,
+    ClearHistoryResponse,
     ConversationListResponse,
     ConversationResource,
     CreateConversationRequest,
+    HistoryCountResponse,
     MessageListResponse,
     MessageResource,
     TurnResource,
     UpdateConversationRequest,
 )
 from mitta.conversations.models import ConversationDraft, ConversationStatus
+from mitta.conversations.ranges import HistoryRange, cutoff_for
 from mitta.conversations.repository import ConversationRepository
+from mitta.errors import ValidationError
 
 router = APIRouter(prefix="/v1/conversations", tags=["conversations"])
 
@@ -62,6 +67,49 @@ async def list_conversations(
         conversations=[ConversationResource.of(c) for c in conversations],
         total=repository.count(status=conversation_status),
     )
+
+
+@router.get("/history/count", response_model=HistoryCountResponse, summary="Size of a range")
+async def history_count(
+    request: Request,
+    _: RequireToken,
+    period: HistoryRange = Query(alias="range"),
+) -> HistoryCountResponse:
+    """How many conversations clearing `range` would delete.
+
+    Declared before `/{conversation_id}`: FastAPI matches in registration order,
+    so a literal segment registered after the parameterised one is unreachable.
+    """
+    repository = _repo(request)
+    since = cutoff_for(period)
+    count = repository.count(status=None) if since is None else repository.count_since(since)
+    return HistoryCountResponse(range=period, count=count, since=since)
+
+
+@router.post("/history/clear", response_model=ClearHistoryResponse, summary="Clear a range")
+async def clear_history(
+    request: Request, body: ClearHistoryRequest, _: RequireToken
+) -> ClearHistoryResponse:
+    """Irreversible. Deletes whole conversations, cascading to their transcripts.
+
+    Audited, and the entry records the resolved cutoff rather than the word the
+    user pressed — "since 1785340800" is checkable later, "this month" is not.
+    """
+    if not body.confirm:
+        raise ValidationError("clearing history requires confirm=true")
+
+    repository = _repo(request)
+    since = cutoff_for(body.range)
+    deleted = repository.delete_all() if since is None else repository.delete_since(since)
+
+    request.app.state.audit.record(
+        actor="user",
+        action="conversation.history_cleared",
+        subject=body.range.value,
+        verdict="allow",
+        detail={"deleted": deleted, "since": since},
+    )
+    return ClearHistoryResponse(deleted=deleted, range=body.range, since=since)
 
 
 @router.get("/{conversation_id}", response_model=ConversationResource, summary="Read one")

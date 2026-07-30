@@ -242,6 +242,52 @@ class ConversationRepository:
                 raise NotFoundError("conversation", conversation_id)
         log.warning("conversation.deleted", extra={"conversation_id": conversation_id})
 
+    def delete_since(self, cutoff: int) -> int:
+        """Delete every conversation last touched at or after `cutoff`. Returns how many.
+
+        `updated_at`, not `created_at`, and the distinction is what the user
+        means. "Clear today" is about the threads they used today — a
+        conversation started last week and continued this morning is part of
+        today's history, and leaving it behind would make the button look broken.
+
+        Cascades to turns and messages through the schema's foreign keys, so
+        there is no orphan sweep to forget.
+        """
+        with self._db.write() as conn:
+            cur = conn.execute("DELETE FROM conversations WHERE updated_at >= ?", (cutoff,))
+            deleted = cur.rowcount
+        if deleted:
+            log.warning(
+                "conversation.bulk_deleted", extra={"count": deleted, "since": cutoff}
+            )
+        return deleted
+
+    def delete_all(self) -> int:
+        """Delete every conversation. Returns how many.
+
+        Separate from `delete_since(0)` so the intent is legible at the call
+        site and in the audit log. "Everything" is a different decision from
+        "everything since a date", even when the SQL would be the same.
+        """
+        with self._db.write() as conn:
+            cur = conn.execute("DELETE FROM conversations")
+            deleted = cur.rowcount
+        if deleted:
+            log.warning("conversation.all_deleted", extra={"count": deleted})
+        return deleted
+
+    def count_since(self, cutoff: int) -> int:
+        """How many conversations `delete_since` would remove.
+
+        Used to put a number in the confirmation. "Delete 34 conversations?" is
+        a question; "Clear today?" is a shrug.
+        """
+        with self._db.read() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) AS n FROM conversations WHERE updated_at >= ?", (cutoff,)
+            ).fetchone()
+        return int(row["n"])
+
     def count(self, *, status: ConversationStatus | None = ConversationStatus.ACTIVE) -> int:
         with self._db.read() as conn:
             if status is None:

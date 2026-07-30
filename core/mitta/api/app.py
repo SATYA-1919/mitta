@@ -174,7 +174,10 @@ def create_app(
         app.include_router(memory_router)
     if gateway is not None:
         app.include_router(providers_router)
-    if conversations is not None:
+    # `audit` too: clearing history is irreversible and writes an audit entry, so
+    # a router mounted without the log would delete a year of conversations and
+    # then 500 on the record of having done it.
+    if conversations is not None and audit is not None:
         app.include_router(conversations_router)
     # Four collaborators, because this router uses all four: the repository, the
     # boundary for `/resolve-path`, the audit log for the two routes that edit a

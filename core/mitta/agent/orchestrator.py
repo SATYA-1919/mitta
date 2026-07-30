@@ -70,6 +70,12 @@ DEFAULT_CONTEXT_WINDOW = 32_000
 _TOOL_HINTS: Final = re.compile(
     r"(?i)\b(search|look ?up|google|find out|latest|news|current|today|"
     r"open|launch|start|run|"
+    # Closing an application is an action like opening one, and its absence here
+    # made `close_app` unreachable: the gate runs before tool selection, so a
+    # request it does not recognise never reaches the model that would have
+    # chosen the tool. The tool existed, was registered, was tested — and "close
+    # spotify" did nothing, which reads exactly like the tool being broken.
+    r"close|quit|exit|shut ?down|"
     r"save|write|note|record|jot|store this|"
     r"who won|what happened|when is|when did|price of|weather)\b"
 )
@@ -176,9 +182,22 @@ class Orchestrator:
         model_id: str | None = None
         failure: MittaError | None = None
 
+        # Per-phase durations, logged at the end of the turn.
+        #
+        # A single `latency_ms` says a turn was slow and nothing about which of
+        # the four sequential model round trips it spent that in. "It's slow" is
+        # not actionable; "the rewrite is 1.4s of a 2.1s turn" is. Durations
+        # only — no content, so this stays inside R5.
+        timings: dict[str, int] = {}
+
+        def mark(phase: str, since: float) -> None:
+            timings[phase] = int((time.monotonic() - since) * 1000)
+
         try:
             yield TurnEvent("turn.thinking", {"phase": "recalling"})
+            phase_started = time.monotonic()
             context = self._build_context(text, conversation.id)
+            mark("recall", phase_started)
 
             log.info(
                 "turn.context_assembled",
@@ -203,12 +222,15 @@ class Orchestrator:
             )
 
             tool_messages: list[ChatMessage] = []
+            phase_started = time.monotonic()
             async for event, extra in self._run_tools(text, turn.id):
                 if event is not None:
                     yield event
                 tool_messages.extend(extra)
+            mark("tools", phase_started)
 
             yield TurnEvent("turn.thinking", {"phase": "reasoning"})
+            phase_started = time.monotonic()
             request = ChatRequest(
                 messages=[*context.messages, *tool_messages],
                 task=TaskClass.CHAT,
@@ -217,10 +239,18 @@ class Orchestrator:
             )
 
             answered_by: list[ModelDescriptor] = []
+            first_token: float | None = None
             async for chunk in self._gateway.stream(request, on_selected=answered_by.append):
                 if chunk.text:
+                    if first_token is None:
+                        first_token = time.monotonic()
+                        # Time to first token, measured from the top of the turn.
+                        # This is the number the user actually feels: the point
+                        # something appears rather than the point it is finished.
+                        timings["first_token"] = int((first_token - started) * 1000)
                     collected.append(chunk.text)
                     yield TurnEvent("turn.delta", {"text": chunk.text})
+            mark("reasoning", phase_started)
 
             if answered_by:
                 provider = answered_by[0].provider
@@ -247,7 +277,9 @@ class Orchestrator:
 
         if self._personality is not None and raw_answer and failure is None:
             yield TurnEvent("turn.thinking", {"phase": "styling"})
+            phase_started = time.monotonic()
             style = await self._personality.apply(raw_answer, user_text=text)
+            mark("styling", phase_started)
             answer = style.text
             register = Register(style.register.value)
             # `styled` records that the pass ran and changed something. A no-op
@@ -309,6 +341,19 @@ class Orchestrator:
             if learned:
                 yield TurnEvent("memory.learned", {"memory_ids": learned, "count": len(learned)})
 
+        log.info(
+            "turn.timings",
+            extra={
+                "turn_id": turn.id,
+                "total_ms": latency_ms,
+                # Every phase that ran, in the order the turn spends them. The
+                # sum is deliberately comparable to `total_ms`: a gap between
+                # them is time going somewhere none of these names covers, which
+                # is exactly what you want to be able to notice.
+                **{f"{phase}_ms": value for phase, value in timings.items()},
+            },
+        )
+
         yield TurnEvent(
             "turn.done",
             {
@@ -318,6 +363,9 @@ class Orchestrator:
                 "latency_ms": latency_ms,
                 "failed": failure is not None,
                 "learned": len(learned),
+                # Surfaced, not just logged. The Monitor surface exists to make
+                # claims checkable, and "MITTA is slow" is a claim.
+                "timings": timings,
             },
         )
 

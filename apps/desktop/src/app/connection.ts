@@ -13,6 +13,7 @@ import {
   getRuntimeInfo,
   isTauriAvailable,
   onMetrics,
+  onPushToTalk,
   onVoiceUpdate,
   type RuntimeInfo,
   ShellUnavailableError,
@@ -177,6 +178,17 @@ async function establish(): Promise<Connection | null> {
     store.setDraft(text);
     store.send();
   });
+  // Wake mode is a standing choice, not a per-session one. Restored after the
+  // handler is bound, so a wake word heard immediately has somewhere to land.
+  void useVoiceStore.getState().restoreWakePreference();
+
+  // ⌘⇧V from anywhere, not just while the window has focus. Bound here rather
+  // than in the voice bar because the shortcut is global and the voice bar
+  // unmounts with its surface — a hold-to-talk key that stops working when you
+  // switch to Memory is worse than one that never existed.
+  const unlistenPushToTalk = await onPushToTalk((down) => {
+    void useVoiceStore.getState().pushToTalk(down);
+  });
 
   // Server-owned state gets its own store fed by the same client, rather than
   // a second client with its own token handling (DEC-018).
@@ -191,6 +203,7 @@ async function establish(): Promise<Connection | null> {
       unbind();
       unlistenMetrics();
       unlistenVoice();
+      unlistenPushToTalk();
       useVoiceStore.getState().bind(null);
       transport.close();
       // Only detach what is still attached. Clearing unconditionally is how a

@@ -23,6 +23,10 @@ export function VoiceBar() {
   const available = useVoiceStore((s) => s.available);
   const status = useVoiceStore((s) => s.status);
   const continuous = useVoiceStore((s) => s.continuous);
+  const calibrate = useVoiceStore((s) => s.calibrate);
+  const calibrating = useVoiceStore((s) => s.calibrating);
+  const threshold = useVoiceStore((s) => s.threshold);
+  const lastWaitMs = useVoiceStore((s) => s.lastWaitMs);
   const transcript = useVoiceStore((s) => s.transcript);
   const error = useVoiceStore((s) => s.error);
   const speaking = useVoiceStore((s) => s.speaking);
@@ -42,44 +46,16 @@ export function VoiceBar() {
     void loadVoiceInfo();
   }, [loadVoiceInfo]);
 
-  // ⌘⇧V, held. `keydown` repeats while a key is down, so the guard is what
-  // stops the recogniser being restarted thirty times a second.
-  const held = useRef(false);
-  useEffect(() => {
-    if (!available) return;
-
-    function down(event: KeyboardEvent) {
-      if (!event.metaKey || !event.shiftKey || event.code !== 'KeyV') return;
-      event.preventDefault();
-      if (held.current) return;
-      held.current = true;
-      void pushToTalk(true);
-    }
-    function up(event: KeyboardEvent) {
-      if (!held.current) return;
-      // Also fires when a modifier is released first, which is the common way
-      // out of a chord — otherwise the microphone stays open after the hold.
-      if (event.code === 'KeyV' || event.key === 'Meta' || event.key === 'Shift') {
-        held.current = false;
-        void pushToTalk(false);
-      }
-    }
-    // Releasing while the window is unfocused never produces a `keyup`.
-    function blur() {
-      if (!held.current) return;
-      held.current = false;
-      void pushToTalk(false);
-    }
-
-    window.addEventListener('keydown', down);
-    window.addEventListener('keyup', up);
-    window.addEventListener('blur', blur);
-    return () => {
-      window.removeEventListener('keydown', down);
-      window.removeEventListener('keyup', up);
-      window.removeEventListener('blur', blur);
-    };
-  }, [available, pushToTalk]);
+  // ⌘⇧V is handled by the *global* shortcut in the Rust shell, bound once in
+  // `connection.ts` — not by a `keydown` listener here.
+  //
+  // A webview listener only fires while MITTA has focus, and the moment you want
+  // to talk to an assistant is the moment you are looking at something else. It
+  // also unmounted with this component, so the key silently stopped working on
+  // every surface except Chat.
+  //
+  // Both together would be worse than either: two paths calling `pushToTalk`
+  // for one gesture restarts the recogniser mid-hold.
 
   if (!available) {
     // Said plainly rather than hidden. A missing button reads as a missing
@@ -122,8 +98,20 @@ export function VoiceBar() {
         ) : transcript.length > 0 ? (
           <span className="truncate text-2xs text-fg-secondary">{transcript}</span>
         ) : (
-          <span className="text-2xs text-fg-faint">
-            {continuous ? 'listening for “mitta”' : 'hold to talk · ⌘⇧V'}
+          <span className="flex items-center gap-2 text-2xs text-fg-faint">
+            <span>{continuous ? 'listening for “mitta”' : 'hold to talk · ⌘⇧V'}</span>
+            {/* How long the last spoken request waited between the wake word
+                matching and being sent — the latency MITTA owns, as opposed to
+                the model's. Shown because three fixes went into this gap on
+                reasoning alone and two were wrong. */}
+            {lastWaitMs !== null && (
+              <span
+                className="readout"
+                title="Wake word heard → request sent. Excludes the model's own time."
+              >
+                {(lastWaitMs / 1000).toFixed(1)}s to send
+              </span>
+            )}
           </span>
         )}
       </div>
@@ -152,6 +140,24 @@ export function VoiceBar() {
         </button>
       )}
 
+      {/* Fits the speech gate to this room and this voice.
+          Offered next to WAKE because that is the mode it affects: the gate is
+          what decides whether the wake word is heard, and a gate set for a quiet
+          room will miss it in a noisy one. */}
+      <button
+        type="button"
+        onClick={() => void calibrate()}
+        disabled={calibrating}
+        title={
+          threshold === null
+            ? 'Measure the room for three seconds so MITTA knows what silence sounds like here'
+            : `Gate set to ${threshold.toFixed(3)}. Run again if the room changed.`
+        }
+        className="shrink-0 text-2xs text-fg-muted hover:text-accent hover:underline disabled:opacity-50"
+      >
+        {calibrating ? 'measuring — stay quiet…' : 'calibrate'}
+      </button>
+
       <Toggle
         label="SPEAK"
         on={speakReplies}
@@ -159,13 +165,23 @@ export function VoiceBar() {
         title={voice === null ? 'Read replies aloud' : `Read replies aloud — ${voice.name}`}
       />
 
-      {/* The microphone stays open the whole time this is on, so it gets a
-          live indicator rather than only a label (DEC-105). */}
+      {/* Labelled WAKE, not ALWAYS.
+
+          "Always" describes the microphone, which is the least useful half of
+          what this does — the mode only ever acts on speech that followed the
+          wake word, so everything else said near the machine is heard and
+          discarded. A user reading "ALWAYS" reasonably concludes MITTA is
+          acting on all of it, and either avoids a mode they wanted or trusts it
+          for something it does not do.
+
+          The microphone genuinely does stay open, so the live indicator stays:
+          the label describes the behaviour and the dot describes the hardware
+          (DEC-105). */}
       <Toggle
-        label="ALWAYS"
+        label="WAKE"
         on={continuous}
         onChange={() => void toggleContinuous()}
-        title="Listen continuously for the wake word — keeps the microphone open"
+        title={'Wake on “mitta” — the microphone stays open, and only speech after the wake word is acted on'}
         indicator={continuous}
       />
     </div>

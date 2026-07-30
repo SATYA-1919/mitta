@@ -28,6 +28,9 @@ export type Conversation = components['schemas']['ConversationResource'];
 export type Message = components['schemas']['MessageResource'];
 export type ConversationList = components['schemas']['ConversationListResponse'];
 export type MessageList = components['schemas']['MessageListResponse'];
+export type HistoryRange = components['schemas']['HistoryRange'];
+export type HistoryCount = components['schemas']['HistoryCountResponse'];
+export type ClearHistoryResult = components['schemas']['ClearHistoryResponse'];
 
 export type Project = components['schemas']['ProjectSummary'];
 export type ProjectList = components['schemas']['ProjectListResponse'];
@@ -247,6 +250,25 @@ export class ApiClient {
   deleteConversation(id: string): Promise<void> {
     return this.request<void>(`/v1/conversations/${encodeURIComponent(id)}`, {
       method: 'DELETE',
+    });
+  }
+
+  /** How many conversations clearing `range` would delete — for the confirmation. */
+  historyCount(range: HistoryRange): Promise<HistoryCount> {
+    return this.get<HistoryCount>(`/v1/conversations/history/count?range=${range}`);
+  }
+
+  /**
+   * Irreversible. Deletes whole conversations and their transcripts.
+   *
+   * `confirm` is sent explicitly and the server rejects the request without it.
+   * The cutoff is never sent — the server computes it from the named range, so
+   * the set deleted cannot differ from the set the button promised.
+   */
+  clearHistory(range: HistoryRange): Promise<ClearHistoryResult> {
+    return this.post<ClearHistoryResult>('/v1/conversations/history/clear', {
+      range,
+      confirm: true,
     });
   }
 

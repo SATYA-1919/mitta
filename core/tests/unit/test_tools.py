@@ -12,6 +12,7 @@ import pytest
 
 from mitta.agent.context import CAPABILITY_PREAMBLE, capability_lines
 from mitta.tools.base import Risk, ToolSpec
+from mitta.tools.builtin.close_app import CloseAppTool
 from mitta.tools.builtin.open_url import OpenUrlTool, normalise
 
 
@@ -111,3 +112,56 @@ class TestCapabilityStatement:
         rendered = CAPABILITY_PREAMBLE.format(capabilities="- open_app: Launch an application")
 
         assert "Never say a tool's name to the user" in rendered
+
+
+class TestCloseApp:
+    """`close_app` is DESTRUCTIVE, and these tests are mostly about that."""
+
+    def _tool(self, closer: object = None) -> CloseAppTool:
+        return CloseAppTool(closer or (lambda name: None))
+
+    def test_it_is_destructive_not_write(self) -> None:
+        # Opening an app undoes itself; closing one can lose an unsaved buffer
+        # MITTA cannot see. The tier is what makes it ask first.
+        assert self._tool().spec.risk is Risk.DESTRUCTIVE
+
+    def test_the_prompt_names_the_app_and_the_risk(self) -> None:
+        prompt = self._tool().spec.describe({"app": "Pages"})
+        assert "Pages" in prompt
+        assert "unsaved" in prompt
+
+    @pytest.mark.asyncio
+    async def test_it_closes_through_the_injected_closer(self) -> None:
+        closed: list[str] = []
+        result = await self._tool(closed.append).run({"app": "Spotify"})
+        assert result.ok
+        assert closed == ["Spotify"]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("app", ["Finder", "finder", "WindowServer", "Dock", "MITTA"])
+    async def test_it_refuses_to_quit_the_desktop(self, app: str) -> None:
+        # A model told to "close everything" will try. Approving "close apps" is
+        # not approving being logged out.
+        called: list[str] = []
+        result = await self._tool(called.append).run({"app": app})
+        assert not result.ok
+        assert called == []
+
+    @pytest.mark.asyncio
+    async def test_it_rejects_a_name_that_is_a_path_or_an_option(self) -> None:
+        called: list[str] = []
+        for app in ["../../bin/sh", "-h", "a;rm -rf /", ""]:
+            result = await self._tool(called.append).run({"app": app})
+            assert not result.ok
+        assert called == []
+
+    @pytest.mark.asyncio
+    async def test_a_closer_that_raises_becomes_a_readable_failure(self) -> None:
+        # The adapter raises when the app is not running, on purpose: saying
+        # "closed it" about something never open is a claim the user would act on.
+        def boom(name: str) -> None:
+            raise RuntimeError(f"{name} is not running")
+
+        result = await self._tool(boom).run({"app": "Spotify"})
+        assert not result.ok
+        assert "not running" in result.content

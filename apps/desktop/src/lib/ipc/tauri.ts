@@ -215,12 +215,36 @@ export function stopListening(): Promise<void> {
   return invoke<void>('voice_stop');
 }
 
+/**
+ * Tune the speech gate to this room and this voice. Returns the threshold set.
+ *
+ * `observed` is the ambient level measured from the update stream during a quiet
+ * moment. This is the part of "train MITTA to my voice" that Apple's APIs allow:
+ * not a voiceprint — no public framework offers speaker adaptation — but the
+ * threshold that decides whether the wake word is heard at all, fitted to how
+ * loud you are and how noisy the room is.
+ */
+export function calibrateVoice(observed: number): Promise<number> {
+  return invoke<number>('voice_calibrate', { observed });
+}
+
 export function speak(text: string, rate = 0): Promise<void> {
   return invoke<void>('voice_speak', { text, rate });
 }
 
 export function stopSpeaking(): Promise<void> {
   return invoke<void>('voice_stop_speaking');
+}
+
+/**
+ * Push-to-talk from the global shortcut, which fires even when MITTA is not focused.
+ *
+ * `true` on press, `false` on release. The webview decides what the utterance
+ * means — filling the composer and sending — so the shell only reports the
+ * gesture; putting that logic on both sides would give one chord two behaviours.
+ */
+export function onPushToTalk(handler: (down: boolean) => void): Promise<() => void> {
+  return listen<boolean>('voice:push_to_talk', handler);
 }
 
 export function onVoiceUpdate(handler: (update: VoiceUpdate) => void): Promise<() => void> {

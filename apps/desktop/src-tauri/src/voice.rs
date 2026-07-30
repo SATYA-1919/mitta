@@ -378,8 +378,26 @@ pub fn spawn_poll_loop(app: AppHandle, state: Arc<VoiceState>) {
                 session_started = std::time::Instant::now();
             }
 
-            let transcript = take_string(unsafe { mitta_voice_copy_transcript() });
-            let triggered = state.is_continuous() && wake_word_at(&transcript).is_some();
+            let raw = take_string(unsafe { mitta_voice_copy_transcript() });
+            let triggered = state.is_continuous() && wake_word_at(&raw).is_some();
+
+            // Publish the request, not the whole transcript.
+            //
+            // One `SFSpeechRecognitionTask` accumulates across every utterance
+            // fed to it, and in wake mode one task runs until the session is
+            // recycled. So the raw transcript after three commands is
+            // "mitta open spotify mitta open safari mitta what's the weather" —
+            // and the webview sends whatever is in this field. Every request
+            // after the first therefore carried all its predecessors, growing
+            // the prompt each time.
+            //
+            // `after_wake_word` already knew how to cut this and nothing was
+            // calling it.
+            let transcript = if triggered {
+                after_wake_word(&raw).unwrap_or(raw)
+            } else {
+                raw
+            };
 
             let key = (listen_state, sequence, triggered);
             let changed = last_emitted != Some(key);
@@ -391,9 +409,32 @@ pub fn spawn_poll_loop(app: AppHandle, state: Arc<VoiceState>) {
             if changed || level_due {
                 let mut update = snapshot(&state, triggered);
                 update.transcript = transcript;
+                let finished = update.is_final;
                 let _ = app.emit("voice:update", update);
                 last_emitted = Some(key);
                 last_level_emit = std::time::Instant::now();
+
+                // A delivered utterance ends its session, so the next one starts
+                // from an empty transcript.
+                //
+                // Cutting at the wake word above fixes what is *sent*; this is
+                // what stops the underlying string growing without bound for 45
+                // seconds. Both are needed: without the recycle, the wake-word
+                // cut still has to scan an ever-longer transcript and the last
+                // request in a session is matched against everything said before
+                // it.
+                //
+                // Emitted first, then recycled — restarting clears the transcript
+                // in Swift, so recycling before the emit would publish an empty
+                // final update and the request would be lost.
+                if finished && triggered {
+                    stop_listening();
+                    if let Err(error) = start_listening(true) {
+                        log::warn!("voice: could not restart after an utterance: {error}");
+                    }
+                    session_started = std::time::Instant::now();
+                    last_emitted = None;
+                }
             }
         }
     });
@@ -465,6 +506,37 @@ mod tests {
         assert_eq!(
             after_wake_word("meta open mitta docs").as_deref(),
             Some("open mitta docs")
+        );
+    }
+
+    #[test]
+    fn the_cut_takes_the_first_wake_word_not_the_last() {
+        // Deliberate, and the reason accumulation is fixed by recycling the
+        // session rather than by cutting differently: "open mitta docs" is a
+        // request that happens to name MITTA, and a last-match cut would reduce
+        // it to "docs".
+        assert_eq!(
+            after_wake_word("meta open mitta docs").as_deref(),
+            Some("open mitta docs")
+        );
+    }
+
+    #[test]
+    fn an_accumulated_transcript_is_not_untangled_by_the_cut() {
+        // One recognition task accumulates every utterance fed to it, so after
+        // three commands the raw transcript holds all three — and cutting at the
+        // first wake word still carries the lot. Sending that meant every spoken
+        // request after the first grew the prompt, which is why they got slower
+        // the longer wake mode stayed on.
+        //
+        // This asserts the limitation rather than a fix, because the fix is
+        // elsewhere: the poll loop recycles the session once an utterance is
+        // delivered, so a transcript this shape never forms.
+        let accumulated = "mitta open spotify mitta open safari";
+        assert_eq!(
+            after_wake_word(accumulated).as_deref(),
+            Some("open spotify mitta open safari"),
+            "the cut alone cannot separate accumulated utterances"
         );
     }
 
