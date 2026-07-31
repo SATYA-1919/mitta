@@ -15,8 +15,8 @@ construction rather than by convention, and both live here:
 
 Landed so far: config, telemetry, OS adapter, persistence, API (Phase 3), the
 memory engine (Phase 5), the LLM gateway and agent (Phase 7), the permission
-model (Phase 8), the planner (Phase 9), personality (Phase 12) and projects
-(Phase 10).
+model (Phase 8), the planner (Phase 9), personality (Phase 12), projects
+(Phase 10) and tasks and schedules (Phase 11).
 """
 
 from __future__ import annotations
@@ -56,6 +56,9 @@ from mitta.policy.engine import PolicyEngine
 from mitta.policy.executor import ToolExecutor
 from mitta.projects.boundary import PathBoundary
 from mitta.projects.repository import ProjectRepository
+from mitta.tasks.repository import TaskRepository
+from mitta.tasks.runner import TaskRunner
+from mitta.tasks.scheduler import Scheduler
 from mitta.telemetry.logging import get_logger, setup_logging
 from mitta.telemetry.redaction import SecretRedactor
 from mitta.tools.builtin.close_app import CloseAppTool
@@ -83,6 +86,7 @@ class Runtime:
     audit: AuditLog
     conversations: ConversationRepository
     projects: ProjectRepository
+    tasks: TaskRepository
     orchestrator: Orchestrator
     app: FastAPI
 
@@ -216,6 +220,28 @@ def build_runtime(
         policy=policy,
     )
 
+    task_repository = TaskRepository(database)
+    # Same reconciliation as turns, for the same reason: a plan left `running`
+    # by a crash is work the surface reports as in progress that no process is
+    # doing, and nothing will ever finish it.
+    task_repository.reconcile_orphaned_runs()
+    runner = TaskRunner(
+        task_repository,
+        registry,
+        tools,
+        policy,
+        audit,
+        orchestrator=orchestrator,
+    )
+    scheduler = Scheduler(
+        task_repository,
+        runner,
+        # The tick is the only thing in the process that wakes up on its own, so
+        # it is also the only sensible home for periodic maintenance. Expired,
+        # unanswered approval tokens were previously purged by nothing at all.
+        on_maintenance=policy.maintenance,
+    )
+
     app = create_app(
         settings=settings,
         paths=paths,
@@ -233,6 +259,9 @@ def build_runtime(
         policy=policy,
         tool_registry=registry,
         audit=audit,
+        tasks=task_repository,
+        task_runner=runner,
+        scheduler=scheduler,
     )
 
     return Runtime(
@@ -247,6 +276,7 @@ def build_runtime(
         audit=audit,
         conversations=conversations,
         projects=projects,
+        tasks=task_repository,
         orchestrator=orchestrator,
         app=app,
     )

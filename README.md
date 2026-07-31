@@ -35,14 +35,15 @@ make dev                            # or in a browser at http://127.0.0.1:1420
 | **Planner** | Bounded tool chains — four rounds, six calls, repeats served from cache |
 | **Permissions** | Parameter-bound single-use approvals, hash-chained audit log |
 | **Projects** | Scope for memory and conversations, and the filesystem boundary — registered roots, exclusions that beat them, write granted per path |
-| **Surfaces** | Chat, Memory, Projects, History (clearable by period), Monitor, Settings |
+| **Schedules** | Cron in your own timezone, DST included. A scheduled question can search and read; a scheduled tool call runs the exact arguments you wrote, and nothing else |
+| **Tasks** | Every step of every run, with what it did, why it stopped, and a retry that does not repeat what already succeeded |
+| **Voice** | On-device speech in and out — push-to-talk, or wake on "MITTA" with an energy-gated microphone |
+| **Surfaces** | Chat, Memory, Projects, Tasks, History (clearable by period), Monitor, Settings |
 | **Shell** | Tauri window, sidecar supervisor, Keychain, ⌘⇧Space palette |
 
 ## What does not
 
-Tasks and Plugins are placeholders and say so. There is no voice input — the wake
-word is decided ("MITTA") but Apple ships no wake-word API and the activation
-mechanism is still open (R7).
+Plugins is a placeholder and says so.
 
 The project write boundary is enforced by the policy engine, but no tool
 currently declares a filesystem path for it to check: `write_note` has its own
@@ -51,6 +52,14 @@ purpose, and it is exercised only by tests until that tool lands (DEC-112).
 A project's timeline endpoint returns nothing, because nothing writes an episode
 yet.
 
+Nothing writes a plan except a schedule coming due, so task dependencies are
+always a straight line and the cycle check has only tests to catch (DEC-121).
+Resuming a scheduled *question* re-asks it rather than continuing it — its steps
+were chosen by a model one at a time, so there is no recorded sequence to
+continue from (DEC-126). The Tasks surface polls rather than being pushed to: a
+scheduled run starts with no socket frame behind it, and one surface did not
+justify a second push channel.
+
 Tool selection depends on a provider that intermittently rejects its own
 model's tool calls. MITTA recovers the call from Groq's error body when it can
 (DEC-102), but a chain is still only as reliable as the model driving it.
@@ -58,7 +67,7 @@ model's tool calls. MITTA recovers the call from Groq's error body when it can
 ## Checking it rather than trusting it
 
 ```bash
-make check-all      # 598 Python · 95 TypeScript · 46 Rust, plus three import contracts
+make check-all      # 691 Python · 103 TypeScript · 46 Rust, plus three import contracts
 make secrets        # fails if a credential is in any committed file
 make check-models   # verifies the hardcoded model ids still exist upstream
 ```
@@ -70,10 +79,10 @@ tiers, and every action MITTA has taken with its hash chain verified on read.
 ## Layout
 
 ```
-core/           Python sidecar — memory, agent, LLM gateway, tools, policy
+core/           Python sidecar — memory, agent, LLM gateway, tools, policy, tasks
 apps/desktop/   React frontend
   src-tauri/    Rust shell — supervises the sidecar, owns the Keychain
-docs/           Requirements, architecture, and 120 recorded decisions
+docs/           Requirements, architecture, and 127 recorded decisions
 scripts/        Development entry points
 ```
 

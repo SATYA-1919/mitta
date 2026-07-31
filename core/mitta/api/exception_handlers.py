@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -31,9 +33,32 @@ async def _handle_validation_error(_request: Request, exc: Exception) -> JSONRes
     assert isinstance(exc, RequestValidationError)
     error = ValidationError(
         "Request failed schema validation",
-        details={"errors": exc.errors()},
+        details={"errors": _jsonable(exc.errors())},
     )
     return _response(error, request_id_var.get())
+
+
+def _jsonable(value: Any) -> Any:
+    """Coerce a Pydantic error report into something `json.dumps` can encode.
+
+    When a field validator raises, Pydantic puts the **exception object itself**
+    in the error's `ctx`. `JSONResponse` cannot encode that, so rendering the
+    422 raised inside the handler and the client got a 500 — a validation error
+    reported as a server fault, for the one class of mistake most likely to be a
+    user's typo.
+
+    Found by the first schema to use a custom validator (`CreateScheduleRequest`
+    parses the cron expression). Every earlier schema validated with declarative
+    constraints, whose errors are strings, so the defect was latent from the day
+    this handler was written.
+    """
+    if isinstance(value, dict):
+        return {str(key): _jsonable(item) for key, item in value.items()}
+    if isinstance(value, list | tuple):
+        return [_jsonable(item) for item in value]
+    if isinstance(value, str | int | float | bool) or value is None:
+        return value
+    return str(value)
 
 
 async def _handle_http_exception(_request: Request, exc: Exception) -> JSONResponse:

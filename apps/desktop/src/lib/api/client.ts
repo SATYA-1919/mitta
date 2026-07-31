@@ -44,6 +44,19 @@ export type UpdateProjectRequest = components['schemas']['UpdateProjectRequest']
 export type AddPathRequest = components['schemas']['AddPathRequest'];
 export type Timeline = components['schemas']['TimelineResponse'];
 
+export type Task = components['schemas']['TaskResource'];
+export type TaskStatus = components['schemas']['TaskStatus'];
+export type TaskList = components['schemas']['TaskListResponse'];
+export type TaskDetail = components['schemas']['TaskDetailResponse'];
+export type Plan = components['schemas']['PlanResource'];
+export type PlanStatus = components['schemas']['PlanStatus'];
+export type PlanDetail = components['schemas']['PlanDetailResponse'];
+export type Schedule = components['schemas']['ScheduleResource'];
+export type ScheduleList = components['schemas']['ScheduleListResponse'];
+export type CreateScheduleRequest = components['schemas']['CreateScheduleRequest'];
+export type UpdateScheduleRequest = components['schemas']['UpdateScheduleRequest'];
+export type RunResult = components['schemas']['RunResponse'];
+
 export interface ListMemoriesParams {
   kind?: MemoryKind;
   projectId?: string;
@@ -325,6 +338,63 @@ export class ApiClient {
 
   projectMemories(id: string, limit = 50): Promise<MemoryList> {
     return this.get<MemoryList>(`/v1/projects/${encodeURIComponent(id)}/memory?limit=${limit}`);
+  }
+
+  // -- tasks and schedules --------------------------------------------------
+
+  listTasks(activeOnly = false, limit = 50): Promise<TaskList> {
+    return this.get<TaskList>(`/v1/tasks?active=${activeOnly}&limit=${limit}`);
+  }
+
+  task(id: string): Promise<TaskDetail> {
+    return this.get<TaskDetail>(`/v1/tasks/${encodeURIComponent(id)}`);
+  }
+
+  /** Stops the whole plan, not just this step (API_DESIGN.md §3.5). */
+  cancelTask(id: string): Promise<RunResult> {
+    return this.post<RunResult>(`/v1/tasks/${encodeURIComponent(id)}/cancel`);
+  }
+
+  /**
+   * Re-runs a failed step. Completed steps are not run again — for a task that
+   * already wrote a file, that would be a second write rather than a resume.
+   */
+  resumeTask(id: string): Promise<RunResult> {
+    return this.post<RunResult>(`/v1/tasks/${encodeURIComponent(id)}/resume`);
+  }
+
+  plan(id: string): Promise<PlanDetail> {
+    return this.get<PlanDetail>(`/v1/plans/${encodeURIComponent(id)}`);
+  }
+
+  listSchedules(): Promise<ScheduleList> {
+    return this.get<ScheduleList>('/v1/schedules');
+  }
+
+  /**
+   * Creating a `tool` schedule authorises that exact call at every later fire
+   * (DEC-122), so this request is a permission grant and the server audits it
+   * as one. Nothing MITTA generates can reach this method.
+   */
+  createSchedule(body: CreateScheduleRequest): Promise<Schedule> {
+    return this.post<Schedule>('/v1/schedules', body);
+  }
+
+  updateSchedule(id: string, body: UpdateScheduleRequest): Promise<Schedule> {
+    return this.request<Schedule>(`/v1/schedules/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    });
+  }
+
+  /** The only way to withdraw the grant. Past runs survive it. */
+  async deleteSchedule(id: string): Promise<void> {
+    await this.request<null>(`/v1/schedules/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  }
+
+  /** Fires now, through the path a real fire takes. Leaves the timetable alone. */
+  runSchedule(id: string): Promise<RunResult> {
+    return this.post<RunResult>(`/v1/schedules/${encodeURIComponent(id)}/run`);
   }
 }
 

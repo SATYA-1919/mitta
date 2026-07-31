@@ -219,6 +219,8 @@ core/
 │   │   ├── decomposer.py     Goal → task DAG
 │   │   ├── executor.py       Resumable execution, checkpoints
 │   │   └── graph.py          Dependency resolution
+│   │                         AS BUILT: tool chaining is `agent/planner.py`
+│   │                         (DEC-101); durable runs are `tasks/` — see below
 │   │
 │   ├── reasoning/            ── Layer 5b: Reasoning Engine ──
 │   │   ├── engine.py         Single-step inference + tool choice
@@ -274,7 +276,12 @@ core/
 │   │   ├── repositories/     One repository per aggregate (Repository Pattern)
 │   │   └── unit_of_work.py   Transaction boundary
 │   │
-│   ├── scheduler/            Task Scheduler — cron + long-running jobs
+│   ├── tasks/                Task Scheduler — cron + durable runs (Phase 11)
+│   │   ├── cron.py           Five-field parser, next fire in a real timezone
+│   │   ├── models.py         Plan · Task · Checkpoint · Schedule + actions
+│   │   ├── repository.py     The five tables, and the claim that fires once
+│   │   ├── runner.py         Unattended execution, and what authorises it
+│   │   └── scheduler.py      The tick — the only thing that starts work itself
 │   ├── config/               Settings model, JSON loading, env overrides
 │   ├── telemetry/            Structured logging + key redaction filter
 │   └── errors.py             Exception hierarchy

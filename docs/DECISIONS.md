@@ -3153,3 +3153,230 @@ learns how the user sounds; it learns how loud their room is, which is what
 decides whether the wake word is heard at all. A custom language model over the
 user's own phrasings remains unbuilt, and is the only remaining thing that would
 deserve the word "train".
+
+---
+
+# Phase 11 — Tasks and Schedules
+
+## DEC-121 — Schedules are the only producer of plans
+
+**Problem.** `plans`, `tasks`, `task_dependencies`, `task_checkpoints` and
+`schedules` have existed since the first migration. Filling all five at once
+invites a plan-decomposing model — hand it a goal, get a DAG — which is the
+version of this feature everybody builds and nobody trusts.
+
+**Decision.** One producer this phase: a schedule that comes due. There is no
+`POST /v1/tasks` and no `POST /v1/plans`, which is not an omission —
+`API_DESIGN.md` §3.5 specifies neither, and the endpoints it *does* specify are
+all about inspecting and interrupting a run rather than starting one.
+
+**Why.** A plan MITTA wrote for itself needs a review step before it runs, and a
+review step needs the user to be present — which is exactly what a schedule is
+not. Starting from the case where the steps are already known keeps the
+execution machinery honest: everything in `TaskRunner` is about recording and
+authorising, not about deciding.
+
+**What this leaves unbuilt, deliberately.** `task_dependencies` is written with
+linear edges only, because the two producers are one call (no edges) and a
+planner chain (each step chosen after seeing the previous one's result, which is
+a line). The cycle check in `add_dependency` is therefore never exercised by
+production data, only by tests. It is written anyway, and as a recursive CTE
+rather than a Python walk, because the moment a producer emits a real graph is
+the moment a missing check becomes a hung plan — and `DATABASE_DESIGN.md` §7
+chose a separate table specifically so this question would be a query.
+
+---
+
+## DEC-122 — Authoring a scheduled call is the authorisation for it
+
+**Problem.** Every approval in this system is a question put to a person who is
+present. DEC-010 binds a token to the exact parameters, DEC-088 refuses an
+"always allow" checkbox, and both assume a card on screen. A schedule fires at
+08:00 with nobody at the machine. So what authorises a `write_note` at 08:00?
+
+**Three answers, and why two lose.**
+
+*(a) Read-only schedules.* Unattended runs are capped at `READ` and a WRITE tool
+is never offered. Safe, and it deletes half the feature: "write my week's notes
+to a file every Friday" is the second thing anyone asks for.
+
+*(b) Park and ask later.* The run stops at the step needing permission, the task
+sits `awaiting_approval`, and the user approves when they return. No standing
+grant ever exists. Rejected as the *primary* mechanism because an automation
+that cannot complete unattended is not an automation — and approving at 18:00
+runs an action authored for 08:00, which for anything outward-facing is worse
+than not running it.
+
+*(c) Pre-authorise the exact call.* **Chosen.** Writing the schedule *is* the
+approval, and the token minted at each fire is bound to the arguments stored on
+the row.
+
+**Why this is not the "always allow" DEC-088 refused.** That checkbox grants a
+*tool*; this grants a *call*. The distinction is the parameter hash, and it is
+the same hash the interactive path uses:
+
+- The token is minted from `schedules.action.params` and nowhere else. The
+  executor re-derives the hash from the arguments it is about to use, so a row
+  edited to different arguments produces a token that fails verification.
+- `PATCH /v1/schedules/{id}` cannot touch `action`. Changing what a schedule
+  does means deleting it and creating the replacement — one deliberate act
+  rather than two halves of one.
+- **No tool creates a schedule.** The capability to write one is the capability
+  to grant a standing permission, so it exists only behind the HTTP surface a
+  user drives. A prompt-injected agent that could author its own schedule would
+  have found the way around the approval model rather than through it.
+- Destructive tools are refused, at creation *and* at every fire. The second
+  check is the one that matters: a tool's risk tier can change between versions,
+  and a grant written against the old tier must not survive the tool getting
+  worse.
+- An exclusion still wins. `PolicyEngine.authorise` checks a refusal before it
+  checks a token (DEC-114), so excluding a path after authoring the schedule
+  stops it — the later instruction is the one that counts.
+- Every fire writes `schedule.fired` and `schedule.authorisation_used` to the
+  audit log, the second carrying `granted_by: schedule`. Without that field the
+  log says the user approved a write at 03:00, which is true only in the sense
+  that they wrote the schedule.
+
+**Trade-off accepted.** A standing authorisation now exists, which is a real
+widening of the permission model and the first of its kind in this codebase. It
+is narrow (one frozen call), visible (the arguments are on the row in the UI, not
+behind a disclosure), revocable (disable or delete) and audited on every use.
+Mechanism (b) remains the right answer for anything this does not cover, and
+`awaiting_approval` is left in the schema for it.
+
+---
+
+## DEC-123 — An unattended prompt is capped at READ
+
+**Problem.** A `prompt` schedule runs a sentence through the agent. The agent
+offers `WRITE` tools whenever it has a broker to ask through — and it has one,
+because it is the same orchestrator the chat window uses.
+
+**Decision.** `Orchestrator.run(unattended=True)` forces the ceiling to `READ`
+and passes no `ask`, regardless of how that orchestrator was wired.
+
+**Why not simply let it park.** Two reasons, and the second is the real one.
+Mechanically, an approval card raised with no socket attached would hold the run
+until the broker timed out, presenting as a schedule that takes two minutes and
+produces nothing. Substantively, DEC-122's grant is only sound because the
+arguments were written by the user; a model choosing arguments at 3am has no such
+backing, and the honest thing is not to offer it the tool. A capability never
+offered cannot be requested — DEC-101's argument, applied to the case where
+nobody is there to refuse.
+
+**Consequence.** "Brief me every morning" works fully: the answer is persisted as
+a conversation and read in History. "Write it to a file every morning" is a
+`tool` schedule, where the user names the file.
+
+---
+
+## DEC-124 — Cron by hand, in the schedule's own timezone
+
+**Problem.** Recurring times. `croniter` is one `pip install` away.
+
+**Decision.** `mitta/tasks/cron.py`, about 300 lines, no dependency — the same
+reasoning as `mitta.ids` implementing ULIDs by hand.
+
+**Why.** The parsing is not the hard part; the calendar is, and the calendar is
+where the small libraries differ from each other. Two behaviours had to be
+*chosen* rather than inherited, and neither is a default anyone should discover
+by accident:
+
+- **The hour that does not exist.** On the morning clocks go forward, 02:30 never
+  happens. A 02:30 job is *skipped* that day rather than moved to 01:30 or 03:30.
+  Something running at a time the user did not ask for is worse than something
+  visibly not running.
+- **The hour that happens twice.** When clocks go back, 01:30 comes round twice.
+  The walk only ever produces the first, and `next_after` refuses any candidate
+  at or before the instant it was given — without that guard the scheduler is
+  handed a "next run" in the past and fires in a loop.
+
+Everything is computed by walking wall-clock minutes in the stored zone,
+converting only at the end. An interval computed in UTC would drift the job an
+hour every spring, and "my briefing arrives an hour early in the summer" looks
+like anything except a timezone bug.
+
+**Also inherited deliberately.** When both day-of-month and day-of-week are
+restricted, cron matches if *either* does. It is a strange rule, it is tested,
+and a parser that quietly disagrees with cron is a trap.
+
+---
+
+## DEC-125 — Claiming a schedule advances its clock, in the same transaction
+
+**Problem.** Two ticks, or one tick overlapping its predecessor, both read the
+same row as due. For an action that writes a file, that is writing it twice.
+
+**Decision.** `claim_due` selects the due rows and updates `last_run_at` and
+`next_run_at` inside one `BEGIN IMMEDIATE`. The scheduler additionally refuses to
+launch a schedule whose previous run is still in flight.
+
+**Consequences that are choices, not accidents.**
+
+*A failed run does not rewind the clock.* Claiming advances the timetable;
+completing does not. A retry that reran an automation because its last attempt
+errored is how a half-completed action becomes a duplicated one — resuming a
+failed task is a deliberate act, on `POST /v1/tasks/{id}/resume`.
+
+*Missed occurrences collapse.* A machine that was off for a week comes back to
+one run per schedule, not seven. The run is *late* and the log says by how much,
+which is the first thing to check when a user says something ran at the wrong
+time. Lateness is preferred to silence: skipping leaves the user to infer from an
+absence whether the feature works at all.
+
+*A row that can no longer be scheduled is disabled, not raised.* A cron
+expression edited outside the API, or a zone the OS dropped in an update, would
+otherwise take down the tick that carries every other schedule.
+
+---
+
+## DEC-126 — Resume means resume for a tool, and re-ask for a prompt
+
+**Problem.** `task_checkpoints` exists so that "resumable execution" is real:
+"for a task that already sent an email, re-running from the top is not a resume —
+it is a duplicate" (`DATABASE_DESIGN.md` §7). Both halves of that promise are not
+equally deliverable.
+
+**Decision.** `POST /v1/tasks/{id}/resume` re-runs the failed task and leaves
+every completed task alone. For a tool task that is exactly a resume. For the
+turn task of a prompt run it is a re-ask, and the docstring and the endpoint
+summary both say so.
+
+**Why the prompt case cannot be more than that.** Its steps were chosen by a
+model, one at a time, each after seeing the previous result. There is no recorded
+sequence to continue from, because the sequence did not exist before it ran —
+asking again is the only honest meaning available, and the model may choose
+differently the second time. Restoring the planner transcript and re-entering
+mid-chain was considered and rejected: it makes a delicate, well-tested module
+resumable in order to produce a *worse* answer than asking again, from stale tool
+results.
+
+**Trade-off accepted.** Checkpoints are written and read, but the state they
+carry is thin — which step, which tool, whether it succeeded. That is enough for
+what exists, and it is honestly less than the schema anticipates.
+
+---
+
+## DEC-127 — Three things this phase found by being run
+
+**The 422 handler could return a 500.** When a Pydantic field validator raises,
+Pydantic puts the *exception object itself* into the error's `ctx`.
+`_handle_validation_error` passed `exc.errors()` straight into the response body,
+`JSONResponse` could not encode it, and the client got a 500 — a server fault
+reported for the one class of mistake most likely to be a user's typo. The defect
+had been latent since the handler was written: every earlier schema validated
+with declarative constraints, whose errors are strings. `CreateScheduleRequest`
+is the first to parse something. Fixed by coercing the error report to JSON
+primitives in the handler, not by removing the validator.
+
+**Expired approval tokens were purged by nothing.** `PolicyEngine.maintenance`
+has existed since Phase 8 with no caller. It is now invoked hourly by the
+scheduler, on the grounds that the tick is the only thing in the process that
+wakes up on its own, and periodic maintenance needs something that does.
+
+**The validator belongs on the wire type, not in the handler.** The first version
+constructed `ScheduleDraft` inside the route, which raises a Pydantic error the
+API has no handler for. Moving the cron, timezone and action checks onto
+`CreateScheduleRequest` means FastAPI's own validation path reports them with the
+field named — and it is what turned the 500 above into a test rather than a
+production surprise.

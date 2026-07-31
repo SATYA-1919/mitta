@@ -65,6 +65,7 @@ class ToolExecutor:
         params: dict[str, Any],
         *,
         turn_id: str | None = None,
+        task_id: str | None = None,
         approval_id: str | None = None,
         signature: str | None = None,
     ) -> Execution:
@@ -74,6 +75,12 @@ class ToolExecutor:
         the model can read and respond to. Raising would abort a turn that is
         otherwise going fine, and "I could not do that because X" is a better
         answer than a stack trace.
+
+        `turn_id` and `task_id` are the two things an invocation can belong to —
+        a conversation turn, or a scheduled run — and a call always has at most
+        one. Both are nullable columns rather than one polymorphic reference,
+        because the audit surface's question is "what did MITTA do while I was
+        away", and that is answered by the presence of a `task_id`.
         """
         try:
             tool = self._registry.get(tool_name)
@@ -85,6 +92,7 @@ class ToolExecutor:
                 ToolResult.failure(f"No such tool: {tool_name}"),
                 verdict="deny",
                 turn_id=turn_id,
+                task_id=task_id,
             )
 
         spec = tool.spec
@@ -99,7 +107,12 @@ class ToolExecutor:
             )
         except ApprovalInvalidError as exc:
             return self._record(
-                tool_name, params, ToolResult.failure(exc.message), verdict="deny", turn_id=turn_id
+                tool_name,
+                params,
+                ToolResult.failure(exc.message),
+                verdict="deny",
+                turn_id=turn_id,
+                task_id=task_id,
             )
 
         if decision.refused:
@@ -116,6 +129,7 @@ class ToolExecutor:
                 ),
                 verdict="deny",
                 turn_id=turn_id,
+                task_id=task_id,
             )
 
         if not decision.allowed:
@@ -126,6 +140,7 @@ class ToolExecutor:
                 ToolResult.failure("Waiting for your approval."),
                 verdict="confirm",
                 turn_id=turn_id,
+                task_id=task_id,
                 status="pending",
             )
             return Execution(
@@ -160,6 +175,7 @@ class ToolExecutor:
             result,
             verdict="allow",
             turn_id=turn_id,
+            task_id=task_id,
             status="succeeded" if result.ok else "failed",
             duration_ms=int((time.monotonic() - started) * 1000),
         )
@@ -172,6 +188,7 @@ class ToolExecutor:
         *,
         verdict: str,
         turn_id: str | None,
+        task_id: str | None = None,
         status: str = "denied",
         duration_ms: int | None = None,
     ) -> Execution:
@@ -180,13 +197,14 @@ class ToolExecutor:
             conn.execute(
                 """
                 INSERT INTO tool_invocations
-                    (id, turn_id, tool_name, params, params_hash, verdict,
+                    (id, turn_id, task_id, tool_name, params, params_hash, verdict,
                      status, result, duration_ms, created_at)
-                VALUES (?,?,?,?,?,?,?,?,?,?)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?)
                 """,
                 (
                     invocation_id,
                     turn_id,
+                    task_id,
                     tool_name,
                     json.dumps(params, sort_keys=True),
                     hash_params(tool_name, params),

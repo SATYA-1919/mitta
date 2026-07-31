@@ -428,6 +428,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/plans/{plan_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Full plan with status */
+        get: operations["get_plan_v1_plans__plan_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/projects": {
         parameters: {
             query?: never;
@@ -595,6 +612,79 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/schedules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Recurring automations */
+        get: operations["list_schedules_v1_schedules_get"];
+        put?: never;
+        /**
+         * Create an automation
+         * @description Validates the action against the live tool registry before storing it.
+         *
+         *     A schedule naming a tool that does not exist, or one that deletes things, is
+         *     rejected here — while the user is looking at the form. The runner checks
+         *     again at every fire, because a tool's risk tier can change between versions
+         *     and a grant written against the old one must not survive it.
+         */
+        post: operations["create_schedule_v1_schedules_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/schedules/{schedule_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete an automation
+         * @description Withdraws the grant. Plans it already produced survive it.
+         *
+         *     They are the record of what ran, and deleting the automation must not delete
+         *     the evidence of what it did.
+         */
+        delete: operations["delete_schedule_v1_schedules__schedule_id__delete"];
+        options?: never;
+        head?: never;
+        /** Rename, retime, enable or disable */
+        patch: operations["update_schedule_v1_schedules__schedule_id__patch"];
+        trace?: never;
+    };
+    "/v1/schedules/{schedule_id}/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run it now
+         * @description Fire a schedule immediately, through the path a real fire takes.
+         *
+         *     Does not disturb the timetable: `next_run_at` is untouched, so a manual run
+         *     at 14:00 does not cancel the 08:00 one tomorrow.
+         */
+        post: operations["run_schedule_v1_schedules__schedule_id__run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/status": {
         parameters: {
             query?: never;
@@ -609,6 +699,91 @@ export interface paths {
         get: operations["status_v1_status_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/tasks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Active and recent tasks */
+        get: operations["list_tasks_v1_tasks_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/tasks/{task_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Detail and checkpoints */
+        get: operations["get_task_v1_tasks__task_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/tasks/{task_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Stop the run
+         * @description Cancels the whole plan, not just this task.
+         *
+         *     A plan is a sequence whose later steps were chosen for the earlier ones, so
+         *     stopping one step and continuing to the next would carry out a request the
+         *     user has just interrupted.
+         */
+        post: operations["cancel_task_v1_tasks__task_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/tasks/{task_id}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retry a failed task
+         * @description Re-runs this task and leaves everything already completed alone.
+         *
+         *     For a prompt run this is a re-ask rather than a resume — the steps were
+         *     chosen by a model and there is no recorded sequence to continue from. The
+         *     endpoint says so rather than pretending otherwise; see `TaskRunner.resume`.
+         *
+         *     A task that is not failed, or that has spent its attempts, is a 409 rather
+         *     than a 400: the request is well-formed and the state is what refuses it.
+         */
+        post: operations["resume_task_v1_tasks__task_id__resume_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -683,6 +858,22 @@ export interface components {
             providers: string[];
             /** Voice */
             voice: boolean;
+        };
+        /**
+         * CheckpointResource
+         * @description What a resumed run would start from.
+         */
+        CheckpointResource: {
+            /** Created At */
+            created_at: number;
+            /** Label */
+            label: string;
+            /** State */
+            state: {
+                [key: string]: unknown;
+            };
+            /** Task Id */
+            task_id: string;
         };
         /**
          * ClearHistoryRequest
@@ -810,6 +1001,50 @@ export interface components {
             settings?: {
                 [key: string]: unknown;
             };
+        };
+        /**
+         * CreateScheduleRequest
+         * @description A new automation.
+         *
+         *     There is deliberately no tool that constructs this request. Authoring a
+         *     `tool` schedule is what authorises its call at every later fire (DEC-122),
+         *     so the ability to write one is the ability to grant a standing permission —
+         *     and a model that could do that would have found the way around the approval
+         *     model rather than through it.
+         */
+        CreateScheduleRequest: {
+            /**
+             * Action
+             * @description {"kind":"prompt","text":…} or {"kind":"tool","tool":…,"params":…}
+             */
+            action: {
+                [key: string]: unknown;
+            };
+            /**
+             * Cron
+             * @description Five fields — minute hour day-of-month month day-of-week — or @daily.
+             */
+            cron: string;
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
+            /** Name */
+            name: string;
+            /**
+             * Timezone
+             * @description IANA zone. The schedule fires on this clock, across DST.
+             * @default UTC
+             */
+            timezone: string;
+        };
+        /** DependencyEdge */
+        DependencyEdge: {
+            /** Depends On */
+            depends_on: string;
+            /** Task Id */
+            task_id: string;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -1007,6 +1242,43 @@ export interface components {
             /** Writable */
             writable: boolean;
         };
+        /**
+         * PlanDetailResponse
+         * @description The full graph — `GET /v1/plans/{id}`.
+         *
+         *     Edges travel separately from tasks rather than as a list on each node. They
+         *     are rows in their own table for the reason `DATABASE_DESIGN.md` §7 gives,
+         *     and flattening them into the nodes on the wire would invite a client to
+         *     treat them as a property of a task rather than a relation between two.
+         */
+        PlanDetailResponse: {
+            /** Edges */
+            edges: components["schemas"]["DependencyEdge"][];
+            plan: components["schemas"]["PlanResource"];
+            /** Tasks */
+            tasks: components["schemas"]["TaskResource"][];
+        };
+        /** PlanResource */
+        PlanResource: {
+            /** Conversation Id */
+            conversation_id: string | null;
+            /** Created At */
+            created_at: number;
+            /** Goal */
+            goal: string;
+            /** Id */
+            id: string;
+            /** Project Id */
+            project_id: string | null;
+            status: components["schemas"]["PlanStatus"];
+            /** Updated At */
+            updated_at: number;
+        };
+        /**
+         * PlanStatus
+         * @enum {string}
+         */
+        PlanStatus: "draft" | "approved" | "running" | "paused" | "completed" | "failed" | "cancelled";
         /** ProjectListResponse */
         ProjectListResponse: {
             /** Projects */
@@ -1094,6 +1366,51 @@ export interface components {
             /** Refused */
             refused: boolean;
         };
+        /**
+         * RunResponse
+         * @description What a manual run or a resume produced.
+         */
+        RunResponse: {
+            plan: components["schemas"]["PlanResource"];
+            /** Tasks */
+            tasks: components["schemas"]["TaskResource"][];
+        };
+        /** ScheduleListResponse */
+        ScheduleListResponse: {
+            /** Scheduler Running */
+            scheduler_running: boolean;
+            /** Schedules */
+            schedules: components["schemas"]["ScheduleResource"][];
+            /** Total */
+            total: number;
+        };
+        /** ScheduleResource */
+        ScheduleResource: {
+            /** Action */
+            action: {
+                [key: string]: unknown;
+            };
+            /** Created At */
+            created_at: number;
+            /** Cron */
+            cron: string;
+            /** Enabled */
+            enabled: boolean;
+            /** Id */
+            id: string;
+            /** Last Run At */
+            last_run_at: number | null;
+            /** Name */
+            name: string;
+            /** Next Run At */
+            next_run_at: number | null;
+            /** Next Run Local */
+            next_run_local: string | null;
+            /** Summary */
+            summary: string;
+            /** Timezone */
+            timezone: string;
+        };
         /** SearchHitResource */
         SearchHitResource: {
             /** Keyword Rank */
@@ -1176,6 +1493,71 @@ export interface components {
             /** Expired */
             expired: number;
         };
+        /** TaskDetailResponse */
+        TaskDetailResponse: {
+            /** Checkpoints */
+            checkpoints: components["schemas"]["CheckpointResource"][];
+            plan: components["schemas"]["PlanResource"];
+            task: components["schemas"]["TaskResource"];
+        };
+        /** TaskListResponse */
+        TaskListResponse: {
+            /** Plans */
+            plans: components["schemas"]["PlanResource"][];
+            /** Tasks */
+            tasks: components["schemas"]["TaskResource"][];
+            /** Total */
+            total: number;
+        };
+        /** TaskResource */
+        TaskResource: {
+            /** Attempt */
+            attempt: number;
+            /** Created At */
+            created_at: number;
+            /** Description */
+            description: string | null;
+            /** Ended At */
+            ended_at: number | null;
+            /** Error */
+            error: {
+                [key: string]: unknown;
+            } | null;
+            /** Id */
+            id: string;
+            /** Max Attempts */
+            max_attempts: number;
+            /** Ordinal */
+            ordinal: number;
+            /** Params */
+            params: {
+                [key: string]: unknown;
+            };
+            /** Parent Id */
+            parent_id: string | null;
+            /** Plan Id */
+            plan_id: string;
+            /** Result */
+            result: {
+                [key: string]: unknown;
+            } | null;
+            /** Resumable */
+            resumable: boolean;
+            /** Started At */
+            started_at: number | null;
+            status: components["schemas"]["TaskStatus"];
+            /** Title */
+            title: string;
+            /** Tool Name */
+            tool_name: string | null;
+            /** Updated At */
+            updated_at: number;
+        };
+        /**
+         * TaskStatus
+         * @enum {string}
+         */
+        TaskStatus: "pending" | "ready" | "running" | "blocked" | "awaiting_approval" | "completed" | "failed" | "skipped";
         /** TimelineEventResource */
         TimelineEventResource: {
             /** Detail */
@@ -1277,6 +1659,24 @@ export interface components {
                 [key: string]: unknown;
             } | null;
             status?: components["schemas"]["ProjectStatus"] | null;
+        };
+        /**
+         * UpdateScheduleRequest
+         * @description Name, timing and enablement only.
+         *
+         *     The action is not patchable. Editing the arguments of a `tool` schedule is
+         *     editing a standing authorisation, and a patch would let one field widen what
+         *     a run may do without re-stating the whole call.
+         */
+        UpdateScheduleRequest: {
+            /** Cron */
+            cron?: string | null;
+            /** Enabled */
+            enabled?: boolean | null;
+            /** Name */
+            name?: string | null;
+            /** Timezone */
+            timezone?: string | null;
         };
         /** ValidationError */
         ValidationError: {
@@ -2079,6 +2479,37 @@ export interface operations {
             };
         };
     };
+    get_plan_v1_plans__plan_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                plan_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanDetailResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_projects_v1_projects_get: {
         parameters: {
             query?: {
@@ -2457,6 +2888,154 @@ export interface operations {
             };
         };
     };
+    list_schedules_v1_schedules_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleListResponse"];
+                };
+            };
+        };
+    };
+    create_schedule_v1_schedules_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateScheduleRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleResource"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_schedule_v1_schedules__schedule_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                schedule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_schedule_v1_schedules__schedule_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                schedule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateScheduleRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleResource"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_schedule_v1_schedules__schedule_id__run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                schedule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     status_v1_status_get: {
         parameters: {
             query?: never;
@@ -2473,6 +3052,132 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StatusResponse"];
+                };
+            };
+        };
+    };
+    list_tasks_v1_tasks_get: {
+        parameters: {
+            query?: {
+                /** @description Only tasks that have not finished. */
+                active?: boolean;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_task_v1_tasks__task_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskDetailResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancel_task_v1_tasks__task_id__cancel_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    resume_task_v1_tasks__task_id__resume_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

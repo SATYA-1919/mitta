@@ -22,9 +22,12 @@ from mitta.api.http import (
     audit_router,
     conversations_router,
     memory_router,
+    plans_router,
     projects_router,
     providers_router,
+    schedules_router,
     system_router,
+    tasks_router,
 )
 from mitta.api.middleware import RequestContextMiddleware
 from mitta.api.ws import router as ws_router
@@ -42,6 +45,9 @@ from mitta.policy.broker import ApprovalBroker
 from mitta.policy.engine import PolicyEngine
 from mitta.projects.boundary import PathBoundary
 from mitta.projects.repository import ProjectRepository
+from mitta.tasks.repository import TaskRepository
+from mitta.tasks.runner import TaskRunner
+from mitta.tasks.scheduler import Scheduler
 from mitta.telemetry.logging import get_logger
 from mitta.tools.registry import ToolRegistry
 
@@ -68,6 +74,9 @@ def create_app(
     policy: PolicyEngine | None = None,
     tool_registry: ToolRegistry | None = None,
     audit: AuditLog | None = None,
+    tasks: TaskRepository | None = None,
+    task_runner: TaskRunner | None = None,
+    scheduler: Scheduler | None = None,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -80,9 +89,18 @@ def create_app(
         # a thread writing to a database the process is closing.
         if indexer is not None:
             indexer.start()
+        # The scheduler is started here rather than in the composition root
+        # because it needs a running event loop, and `build_runtime` is
+        # synchronous. Tying it to the lifespan also means the only process that
+        # ever ticks is one that is serving requests — a schema export or a test
+        # that constructs the app never fires anybody's automations.
+        if scheduler is not None:
+            scheduler.start()
         try:
             yield
         finally:
+            if scheduler is not None:
+                await scheduler.stop()
             if indexer is not None:
                 indexer.stop()
             # Release any turn waiting on a human, or the loop stays alive
@@ -118,6 +136,9 @@ def create_app(
     app.state.policy = policy
     app.state.tool_registry = tool_registry
     app.state.audit = audit
+    app.state.tasks = tasks
+    app.state.task_runner = task_runner
+    app.state.scheduler = scheduler
     app.state.api_version = API_VERSION
     app.state.started_at = time.monotonic()
     app.state.token_verifier = TokenVerifier(
@@ -190,6 +211,15 @@ def create_app(
         and memory is not None
     ):
         app.include_router(projects_router)
+    # Four collaborators again, and the same reasoning. The runner is what
+    # `cancel`, `resume` and `run` call; the audit log is where creating or
+    # deleting a `tool` schedule is recorded, and a router that could grant a
+    # standing authorisation without writing that line down would defeat the
+    # point of having one.
+    if tasks is not None and task_runner is not None and audit is not None:
+        app.include_router(tasks_router)
+        app.include_router(plans_router)
+        app.include_router(schedules_router)
     # Always mounted: the socket authenticates and reports agent unavailability
     # itself, and a client that cannot connect at all has no way to be told why.
     if audit is not None:

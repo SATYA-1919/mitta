@@ -32,9 +32,15 @@ from mitta.memory.service import MemoryService
 from mitta.memory.vectors.store import VectorStore, build_index
 from mitta.os_adapter.mac import MacAdapter
 from mitta.persistence.database import Database
+from mitta.policy.approval import ApprovalAuthority
 from mitta.policy.audit import AuditLog
+from mitta.policy.engine import PolicyEngine
+from mitta.policy.executor import ToolExecutor
 from mitta.projects.boundary import PathBoundary
 from mitta.projects.repository import ProjectRepository
+from mitta.tasks.repository import TaskRepository
+from mitta.tasks.runner import TaskRunner
+from mitta.tools.registry import ToolRegistry
 
 
 def build_openapi() -> dict[str, Any]:
@@ -59,6 +65,10 @@ def build_openapi() -> dict[str, Any]:
     repository = MemoryRepository(database)
     store = VectorStore(database, build_index(paths.vectors / "schema.faiss", embedder), embedder)
     projects = ProjectRepository(database)
+    audit = AuditLog(database)
+    registry = ToolRegistry()
+    policy = PolicyEngine(audit, ApprovalAuthority(database), boundary=PathBoundary(projects))
+    task_repository = TaskRepository(database)
     app = create_app(
         settings=settings,
         paths=paths,
@@ -74,7 +84,16 @@ def build_openapi() -> dict[str, Any]:
         conversations=ConversationRepository(database),
         projects=projects,
         path_boundary=PathBoundary(projects),
-        audit=AuditLog(database),
+        audit=audit,
+        tool_registry=registry,
+        tasks=task_repository,
+        task_runner=TaskRunner(
+            task_repository, registry, ToolExecutor(registry, policy, database), policy, audit
+        ),
+        # No scheduler: this app is constructed to be read, not run, and a
+        # lifespan that started a tick would be one more reason for a codegen
+        # step to touch a database it has no business opening.
+        scheduler=None,
     )
     document: dict[str, Any] = app.openapi()
     _assert_complete(document)
@@ -91,6 +110,9 @@ REQUIRED_PATH_PREFIXES = (
     "/v1/providers",
     "/v1/conversations",
     "/v1/projects",
+    "/v1/tasks",
+    "/v1/plans",
+    "/v1/schedules",
 )
 
 

@@ -30,9 +30,15 @@ from mitta.memory.vectors.store import VectorStore, build_index
 from mitta.os_adapter.mac import MacAdapter
 from mitta.persistence.database import Database
 from mitta.persistence.migrations import migrate
+from mitta.policy.approval import ApprovalAuthority
 from mitta.policy.audit import AuditLog
+from mitta.policy.engine import PolicyEngine
+from mitta.policy.executor import ToolExecutor
 from mitta.projects.boundary import PathBoundary
 from mitta.projects.repository import ProjectRepository
+from mitta.tasks.repository import TaskRepository
+from mitta.tasks.runner import TaskRunner
+from mitta.tools.registry import ToolRegistry
 
 TEST_TOKEN = "test-session-token-0123456789abcdef"
 
@@ -104,6 +110,9 @@ def client(
     path_boundary: PathBoundary,
     orchestrator: Orchestrator,
     migrated_audit: AuditLog,
+    task_repository: TaskRepository,
+    task_runner: TaskRunner,
+    tool_registry: ToolRegistry,
 ) -> Iterator[TestClient]:
     app = create_app(
         settings=settings,
@@ -123,6 +132,13 @@ def client(
         path_boundary=path_boundary,
         orchestrator=orchestrator,
         audit=migrated_audit,
+        tasks=task_repository,
+        task_runner=task_runner,
+        tool_registry=tool_registry,
+        # No scheduler. Every test that needs a fire calls `tick()` on one it
+        # built itself, so a run happens because a test asked for it rather than
+        # because a clock in the fixture happened to come round.
+        scheduler=None,
     )
     with TestClient(app) as test_client:
         yield test_client
@@ -229,3 +245,54 @@ def projects(migrated: Database) -> ProjectRepository:
 @pytest.fixture
 def path_boundary(projects: ProjectRepository) -> PathBoundary:
     return PathBoundary(projects)
+
+
+# ── Tasks and schedules ────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def tool_registry() -> ToolRegistry:
+    """Empty by default.
+
+    Tests that need a tool register their own double, so nothing here can run a
+    real `open_application` because a fixture happened to include it.
+    """
+    return ToolRegistry()
+
+
+@pytest.fixture
+def policy_engine(
+    migrated: Database, migrated_audit: AuditLog, path_boundary: PathBoundary
+) -> PolicyEngine:
+    return PolicyEngine(migrated_audit, ApprovalAuthority(migrated), boundary=path_boundary)
+
+
+@pytest.fixture
+def tool_executor(
+    tool_registry: ToolRegistry, policy_engine: PolicyEngine, migrated: Database
+) -> ToolExecutor:
+    return ToolExecutor(tool_registry, policy_engine, migrated)
+
+
+@pytest.fixture
+def task_repository(migrated: Database) -> TaskRepository:
+    return TaskRepository(migrated)
+
+
+@pytest.fixture
+def task_runner(
+    task_repository: TaskRepository,
+    tool_registry: ToolRegistry,
+    tool_executor: ToolExecutor,
+    policy_engine: PolicyEngine,
+    migrated_audit: AuditLog,
+) -> TaskRunner:
+    """No orchestrator, so a prompt action fails as unavailable.
+
+    Tests that exercise a prompt run build a runner with a scripted one. Wiring
+    the keyless gateway in here would make every task test depend on a provider
+    failure path that has nothing to do with what they assert.
+    """
+    return TaskRunner(
+        task_repository, tool_registry, tool_executor, policy_engine, migrated_audit
+    )

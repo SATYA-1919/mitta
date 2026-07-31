@@ -146,6 +146,7 @@ class Orchestrator:
         text: str,
         conversation_id: str | None = None,
         input_kind: InputKind = InputKind.TEXT,
+        unattended: bool = False,
     ) -> AsyncIterator[TurnEvent]:
         """Run one turn, yielding events as they happen.
 
@@ -153,6 +154,10 @@ class Orchestrator:
         the turn row. A turn left `running` shows in the UI as a thinking
         indicator that never resolves (DEC-069), so the `finally` is not
         defensive tidiness; it is the thing that stops that state existing.
+
+        `unattended` marks a turn nobody is watching — a scheduled run. It caps
+        tools at `Risk.READ`, because every approval in this system is a
+        question put to a person who is present, and there is no one to ask.
         """
         conversation = (
             self._conversations.get(conversation_id)
@@ -223,7 +228,7 @@ class Orchestrator:
 
             tool_messages: list[ChatMessage] = []
             phase_started = time.monotonic()
-            async for event, extra in self._run_tools(text, turn.id):
+            async for event, extra in self._run_tools(text, turn.id, unattended=unattended):
                 if event is not None:
                     yield event
                 tool_messages.extend(extra)
@@ -370,7 +375,7 @@ class Orchestrator:
         )
 
     async def _run_tools(
-        self, text: str, turn_id: str
+        self, text: str, turn_id: str, *, unattended: bool = False
     ) -> AsyncIterator[tuple[TurnEvent | None, list[ChatMessage]]]:
         """Let the model call tools, in a chain, before it answers.
 
@@ -381,6 +386,13 @@ class Orchestrator:
         Showing a model a capability that cannot complete produces confident
         promises MITTA cannot keep, and a capability never offered cannot be
         requested — which is cheaper than refusing the call afterwards.
+
+        An unattended turn is the same argument with the answer fixed: there is
+        nobody to ask, so the ceiling is `READ` regardless of what this
+        orchestrator was wired with. Passing an `ask` that could open a card no
+        one will see would hang the run until the broker timed out, and the
+        cheapest way to guarantee that cannot happen is to not offer the tools
+        that would need it (DEC-123).
 
         The pass is skipped entirely when nothing in the request suggests a
         tool. Most turns need none, and asking the model "do you want a tool?"
@@ -395,12 +407,13 @@ class Orchestrator:
         ) -> AsyncIterator[tuple[TurnEvent | None, Execution | None]]:
             return self._ask_then_run(name, params, prompt, turn_id)
 
-        ceiling = Risk.WRITE if self._can_ask() else Risk.READ
+        can_ask = self._can_ask() and not unattended
+        ceiling = Risk.WRITE if can_ask else Risk.READ
         async for item in self._planner.run(
             text=text,
             turn_id=turn_id,
             ceiling=ceiling,
-            ask=ask if self._can_ask() else None,
+            ask=ask if can_ask else None,
         ):
             if isinstance(item, Plan):
                 # The transcript arrives whole, at the end. Emitting the

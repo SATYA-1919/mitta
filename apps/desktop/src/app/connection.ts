@@ -23,6 +23,7 @@ import { useMemoryStore } from '@/state/memory';
 import { useProjectsStore } from '@/state/projects';
 import { bindTransport } from '@/state/sync';
 import { useStore } from '@/state/store';
+import { useTasksStore } from '@/state/tasks';
 import { useVoiceStore } from '@/state/voice';
 
 export interface Connection {
@@ -194,6 +195,7 @@ async function establish(): Promise<Connection | null> {
   // a second client with its own token handling (DEC-018).
   useMemoryStore.getState().attach(api);
   useProjectsStore.getState().attach(api);
+  useTasksStore.getState().attach(api);
   useStore.getState().attachChat(api, transport);
 
   const connection: Connection = {
@@ -211,6 +213,7 @@ async function establish(): Promise<Connection | null> {
       if (useStore.getState().transport === transport) {
         useMemoryStore.getState().attach(null);
         useProjectsStore.getState().attach(null);
+        useTasksStore.getState().attach(null);
         useStore.getState().attachChat(null, null);
       }
       if (established !== null) {

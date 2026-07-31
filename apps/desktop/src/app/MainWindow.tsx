@@ -19,6 +19,7 @@ import { MemorySurface } from '@/components/memory/MemorySurface';
 import { MonitorSurface } from '@/components/monitor/MonitorSurface';
 import { ProjectsSurface } from '@/components/projects/ProjectsSurface';
 import { SettingsSurface } from '@/components/settings/SettingsSurface';
+import { TasksSurface } from '@/components/tasks/TasksSurface';
 import { HudRule } from '@/components/ui/hud';
 import { cx, EmptyState, StatusDot } from '@/components/ui/primitives';
 import { CoreRing, RadialGauge } from '@/components/ui/radial';
@@ -68,8 +69,9 @@ export function MainWindow() {
           {surface === 'monitor' && <MonitorSurface />}
           {surface === 'settings' && <SettingsSurface />}
           {surface === 'projects' && <ProjectsSurface />}
-          {(surface === 'tasks' || surface === 'plugins') && (
-            <EmptyState title={`${surface} is not built yet`} hint="Lands in a later phase" />
+          {surface === 'tasks' && <TasksSurface />}
+          {surface === 'plugins' && (
+            <EmptyState title="plugins is not built yet" hint="Lands in a later phase" />
           )}
         </main>
 
